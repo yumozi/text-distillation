@@ -1,11 +1,3 @@
-"""
-This training script can be run both on a single gpu in debug mode,
-and also in a larger training run with distributed data parallel (ddp).
-
-To run on a single GPU small debug run, example:
-$ python -m train.py --compile=False --eval_iters=10 --batch_size=8
-"""
-
 import math
 import os
 import time
@@ -23,10 +15,8 @@ from export import model_export
 
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from tokenizer import Tokenizer
+
 import pdb
-import torchviz
-import torch.nn.functional as F
-import copy
 
 # -----------------------------------------------------------------------------
 # I/O
@@ -56,7 +46,7 @@ dropout = 0.0
 # adamw optimizer
 gradient_accumulation_steps = 4  # used to simulate larger batch sizes
 learning_rate = 5e-4  # max learning rate
-max_iters = 10  # total number of training iterations
+max_iters = 500  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -225,58 +215,37 @@ if wandb_log:
 #  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
 
 NUM_CONDENSED_DATA = batch_size
-LR_SYN = 100
+LR_SYN = 200
 MOMENTUM = 0.5
-OPTIMIZATION_STEPS = 10
+REAL_INIT = True
 
-# NOTE: Main Challenge: float vs long Tensor
-# If we use long Tensor, we can't set requires_grad=True
-# If we use float Tensor, we can't pass it through the embedding layer
-# If we convert it mid-way, we lose the gradient information
-
-# initailize a set of text data
-# syn_data = torch.randint(0, 32000, (NUM_CONDENSED_DATA, 256 + 1), device=device)
-
-# Instead of initailizing a set of text data randomly, we initialize it with some real data
-X, Y = next(iter_batches(split="train"))
+# If REAL_INIT, initialize synthetic data with real data
+if REAL_INIT:
+    X, Y = next(iter_batches(split="train"))
+else:
+    X = torch.randint(0, 32000, (NUM_CONDENSED_DATA, 256), device=device)
+    Y = torch.randint(0, 32000, (NUM_CONDENSED_DATA, 256), device=device)
 
 # Instead of optimizing tokens, we have to optimize embeddings
-X_syn_embeddings = model.tok_embeddings(X).detach().clone().requires_grad_(True)
-Y_syn = Y
+concat_syn = torch.cat((X, Y[:, -1].unsqueeze(1)), dim=1)
+# X_syn_embeddings = model.tok_embeddings(X).detach().clone().requires_grad_(True)
+# Y_syn = Y
+concat_syn_embeddings = model.tok_embeddings(concat_syn).detach().clone().requires_grad_(True)
 
 # X, Y each are (batch_size, max_seq_len), need to combine to get (batch_size, max_seq_len + 1 
 # by adding the last token of Y to the end of X
 # syn_data = torch.cat((X, Y[:, -1].unsqueeze(1)), dim=1)
 
-optimizer_syn = torch.optim.SGD([X_syn_embeddings], lr=LR_SYN, momentum=MOMENTUM)
+optimizer_syn = torch.optim.SGD([concat_syn_embeddings], lr=LR_SYN, momentum=MOMENTUM)
 optimizer_syn.zero_grad()
 criterion = torch.nn.CrossEntropyLoss().to(device)
 
 tokenizer = Tokenizer()
 
+# split x from concat
+X_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous()
 print("Word form of Synthetic data embeddings:" + ' '.join(tokenizer.decode(model.decode_embeddings(X_syn_embeddings).long().tolist())))
 print("Original Synthetic data words:" + ''.join(tokenizer.decode(X[0].long().tolist())))
-
-# tokenizer.decode(syn_data[0].long().tolist())
-
-def distance_wb(gwr, gws):
-    shape = gwr.shape
-    if len(shape) == 4: # conv, out*in*h*w
-        gwr = gwr.reshape(shape[0], shape[1] * shape[2] * shape[3])
-        gws = gws.reshape(shape[0], shape[1] * shape[2] * shape[3])
-    elif len(shape) == 3:  # layernorm, C*h*w
-        gwr = gwr.reshape(shape[0], shape[1] * shape[2])
-        gws = gws.reshape(shape[0], shape[1] * shape[2])
-    elif len(shape) == 2: # linear, out*in
-        tmp = 'do nothing'
-    elif len(shape) == 1: # batchnorm/instancenorm, C; groupnorm x, bias
-        gwr = gwr.reshape(1, shape[0])
-        gws = gws.reshape(1, shape[0])
-        return torch.tensor(0, dtype=torch.float, device=gwr.device)
-
-    dis_weight = torch.sum(1 - torch.sum(gwr * gws, dim=-1) / (torch.norm(gwr, dim=-1) * torch.norm(gws, dim=-1) + 0.000001))
-    dis = dis_weight
-    return dis
 
 
 # ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ 
@@ -286,7 +255,6 @@ def distance_wb(gwr, gws):
 #    ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
 #    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
                                                             
-# training loop
 train_batch_iter = iter_batches(split="train")
 
 # X is (batch_size, max_seq_len) and Y is (batch_size, max_seq_len)
@@ -296,53 +264,17 @@ t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 raw_model = model  # unwrap DDP container if needed
 running_mfu = -1.0
+
 while True:
-    # determine and set the learning rate for this iteration
-    lr = get_lr(iter_num) if decay_lr else learning_rate
-    for param_group in optimizer.param_groups:
-        param_group["lr"] = lr
-
-    # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0:
-        losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        if wandb_log:
-            try:
-                wandb.log(
-                    {
-                        "iter": iter_num,
-                        "tokens": iter_num * tokens_per_iter,
-                        "loss/train": losses["train"],
-                        "loss/val": losses["val"],
-                        "lr": lr,
-                        "mfu": running_mfu * 100,  # convert to percentage
-                    }, step = iter_num
-                )
-            except Exception as e:
-                print(f"logging to wandb failed: {e}")
-        if losses["val"] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses["val"]
-            if iter_num > 0:
-                checkpoint = {
-                    "model": raw_model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "model_args": model_args,
-                    "iter_num": iter_num,
-                    "best_val_loss": best_val_loss,
-                    "config": config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
-                model_export(raw_model, os.path.join(out_dir, "model.bin"), version=0)
-
     if iter_num == 0 and eval_only:
         break
     
-    # train synthetic data
     X, Y = next(train_batch_iter)
     X_real, Y_real = X, Y
+    concat_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1)
+
     
-    # sample a batch of synthetic data
+    # SAMPLE BATCH OF SYNTHETIC DATA - in progress
     # syn_loader = torch.utils.data.DataLoader(syn_data, batch_size=batch_size, shuffle=True)
     # syn = next(iter(syn_loader))
     # X_syn = syn[:, :-1].contiguous() # need contiguous to make stride (256, 1) instead of (257, 1)
@@ -353,145 +285,63 @@ while True:
     # X_syn = syn_data[:, :-1].contiguous() # need contiguous to make stride (256, 1) instead of (257, 1)
     # Y_syn = syn_data[:, 1:].contiguous().detach()
 
-    loss_data = torch.tensor(0.0).to(device)
-
-    # Create a clone of model to prevent the gradient from being propagated to the original model
     model_syn = Transformer(gptconf).to(device)
-    original_state_dict = model.state_dict()
-    adjusted_state_dict = {key.replace('_orig_mod.', ''): value for key, value in original_state_dict.items()}
-
-    model_syn.load_state_dict(adjusted_state_dict)
     
-       
     with ctx:
         with sdpa_kernel(SDPBackend.MATH):
  
-            # logits_real = model_syn(X_real, Y_real)
-            # loss_real = F.cross_entropy(logits_real.view(-1, logits_real.size(-1)), Y_real.view(-1), ignore_index=-1)
-            # print("loss_real:" + str(loss_real))
-            # gw_real = torch.autograd.grad(loss_real, model_syn.parameters())
-            # print(gw_real[0][0][0])
-            # gw_real = list((_.detach().clone() for _ in gw_real))
-            # # gw_real is always 0
-            # print("gw_real: " + str(gw_real[0][0][0]))
-
-            # logits_syn = model_syn.forward_using_embeddings(X_syn_embeddings, Y_syn)
-            # loss_syn = model_syn.last_loss
-
-            # gw_syn = torch.autograd.grad(loss_syn, list(model_syn.parameters()), create_graph=True)
-
-            # print("gw_syn: " + str(gw_syn[0][0][0]))
-
-            # # calculate distance
-            # dis = torch.tensor(0.0).to(device)
-            # for ig in range(len(gw_real)):
-            #     gwr = gw_real[ig]
-            #     gws = gw_syn[ig]
-            #     dis += distance_wb(gwr, gws)
-
-            # # print(dis)
-            # loss_data += dis
-
-            # loss_data.backward()
-
             embed = model_syn.tok_embeddings
-            output_real = embed(X_real).detach()
-            
-            loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(X_syn_embeddings, dim=1))**2)
-
-            # print("The gradient of synthetic data:" + str(X_syn_embeddings.grad[0][0]))
-
+            output_real = embed(concat_real).detach()
+            # print("Output real shape: " + str(output_real.shape))
+            # print("concat_syn_embeddings shape: " + str(concat_syn_embeddings.shape))
+            loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(concat_syn_embeddings, dim=1))**2)
             optimizer_syn.zero_grad()
             loss.backward()
             optimizer_syn.step()
 
-
-    # Print a random synthetic data, decoded
     if iter_num % 10 == 0:
-        print("Trained Synthetic data at Iteration " + str(iter_num) + ":")
+        print("Iteration " + str(iter_num) + ", Loss: " + str(loss.item()))
+
+    if iter_num % 100 == 0:
+        print("Synthetic data at Iteration " + str(iter_num) + ":")
+        X_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous()
         tokens = model.decode_embeddings(X_syn_embeddings).long().tolist()
         print(' '.join(tokenizer.decode(tokens)))
         print("\n")
 
-
-    # forward backward update, with optional gradient accumulation to simulate larger batch size
-    # and using the GradScaler if data type is float16
-    for micro_step in range(gradient_accumulation_steps):
-        with ctx:
-            logits = model(X, Y)
-            loss = raw_model.last_loss
-            loss = loss / gradient_accumulation_steps
-        # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = next(train_batch_iter)
-        # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
-    # clip the gradient
-    if grad_clip != 0.0:
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-    # step the optimizer and scaler if training in fp16
-    scaler.step(optimizer)
-    scaler.update()
-    # flush the gradients as soon as we can, no need for this memory anymore
-    optimizer.zero_grad(set_to_none=True)
-
-    # timing and logging
-    t1 = time.time()
-    dt = t1 - t0
-    t0 = t1
-    if iter_num % log_interval == 0:
-        # get loss as float, scale up due to the divide above. note: this is a CPU-GPU sync point
-        lossf = loss.item() * gradient_accumulation_steps
-        if local_iter_num >= 5:  # let the training loop settle a bit
-            mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
-            running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
-        print(
-            f"{iter_num} | loss {lossf:.4f} | lr {lr:e} | {dt*1000:.2f}ms | mfu {running_mfu*100:.2f}%"
-        )
     iter_num += 1
-    local_iter_num += 1
 
     # termination conditions
     if iter_num > max_iters:
         break
 
-syn_data = model.decode_embeddings(X_syn_embeddings).long().tolist()
-# remove inner list
-syn_data = [item for sublist in syn_data for item in sublist]
+# ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗██╗ ██████╗ ███╗   ██╗
+# ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║
+# █████╗  ██║   ██║███████║██║     ██║   ██║███████║   ██║   ██║██║   ██║██╔██╗ ██║
+# ██╔══╝  ╚██╗ ██╔╝██╔══██║██║     ██║   ██║██╔══██║   ██║   ██║██║   ██║██║╚██╗██║
+# ███████╗ ╚████╔╝ ██║  ██║███████╗╚██████╔╝██║  ██║   ██║   ██║╚██████╔╝██║ ╚████║
+# ╚══════╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
 
-print(syn_data)
-# Train a new model on the synthetic data for some iterations
-syn_train_iter = 100
+LOG_ITER = 50
+SAVE_ITER = 250
+TRAIN_ITER = 1000
+                                                                                 
+X_syn_embeddings, Y_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous(), concat_syn_embeddings[:, 1:].contiguous()
+
+# split syn_data into X and Y
+X, Y = model.decode_embeddings(X_syn_embeddings), model.decode_embeddings(Y_syn_embeddings)
+
+# remove inner list
+X.unsqueeze(0)
+Y.unsqueeze(0)
 
 model = Transformer(gptconf).to(device)
+optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
 
-for i in range(syn_train_iter):
+for i in range(TRAIN_ITER):
 
-    # Split syn into X and Y
-    X = torch.tensor(syn_data[:-1], device=device).unsqueeze(0)
-    Y = torch.tensor(syn_data[1:], device=device).unsqueeze(0)
-    for micro_step in range(gradient_accumulation_steps):
-        with ctx:
-            logits = model(X, Y)
-            loss = model.last_loss
-            loss = loss / gradient_accumulation_steps
-        # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = next(train_batch_iter)
-        # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
-    # clip the gradient
-    if grad_clip != 0.0:
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-    # step the optimizer and scaler if training in fp16
-    scaler.step(optimizer)
-    scaler.update()
-    # flush the gradients as soon as we can, no need for this memory anymore
-    optimizer.zero_grad(set_to_none=True)
-    print("Syn train iteration " + str(i) + " loss: " + str(loss.item()))
-
-    if i % 10 == 0:
-        if i > 0:
+    # Save model
+    if i % SAVE_ITER == 0 and i != 0:
             checkpoint = {
                 "model": raw_model.state_dict(),
                 "optimizer": optimizer.state_dict(),
@@ -504,3 +354,30 @@ for i in range(syn_train_iter):
             torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
             model_export(raw_model, os.path.join(out_dir, "model.bin"), version=0)
 
+    # Split syn into X and Y
+    # X = torch.tensor(syn_data[:-1], device=device).unsqueeze(0)
+    # Y = torch.tensor(syn_data[1:], device=device).unsqueeze(0)
+
+    # Training
+    total_loss = 0
+    for micro_step in range(gradient_accumulation_steps):
+        with ctx:
+            logits = model(X, Y)
+            loss = model.last_loss
+            loss = loss / gradient_accumulation_steps
+            total_loss += loss
+
+        # backward pass, with gradient scaling if training in fp16
+        scaler.scale(loss).backward()
+    # clip the gradient
+    if grad_clip != 0.0:
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+    # step the optimizer and scaler if training in fp16
+    scaler.step(optimizer)
+    scaler.update()
+    # flush the gradients as soon as we can, no need for this memory anymore
+    optimizer.zero_grad(set_to_none=True)
+
+    if i % LOG_ITER == 0:
+        print(f"Loss at iteration {i}: {total_loss}")

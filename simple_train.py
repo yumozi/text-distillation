@@ -55,7 +55,7 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 1000  # how many steps to warm up for
 # system
-device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = "mps"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16
 compile = True  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
@@ -329,6 +329,7 @@ TRAIN_ITER = 1000
 X_syn_embeddings, Y_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous(), concat_syn_embeddings[:, 1:].contiguous()
 
 # split syn_data into X and Y
+# Important: Try to see what will the model work just with embeddings instead of tokens
 X, Y = model.decode_embeddings(X_syn_embeddings), model.decode_embeddings(Y_syn_embeddings)
 
 # remove inner list

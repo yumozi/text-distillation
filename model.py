@@ -296,6 +296,8 @@ class Transformer(nn.Module):
 
         return logits
     
+
+    # Important: Try to see how the model perform if we used the embeddings as input instead of the tokens
     def forward_using_embeddings(self, embeddings: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
         _bsz, seqlen, _ = embeddings.shape
         h = self.dropout(embeddings)

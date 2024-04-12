@@ -13,7 +13,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from tinystories import Task
 from export import model_export
 
-from torch.nn.attention import SDPBackend, sdpa_kernel
 from tokenizer import Tokenizer
 
 import pdb
@@ -288,16 +287,14 @@ while True:
     model_syn = Transformer(gptconf).to(device)
     
     with ctx:
-        with sdpa_kernel(SDPBackend.MATH):
- 
-            embed = model_syn.tok_embeddings
-            output_real = embed(concat_real).detach()
-            # print("Output real shape: " + str(output_real.shape))
-            # print("concat_syn_embeddings shape: " + str(concat_syn_embeddings.shape))
-            loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(concat_syn_embeddings, dim=1))**2)
-            optimizer_syn.zero_grad()
-            loss.backward()
-            optimizer_syn.step()
+        embed = model_syn.tok_embeddings
+        output_real = embed(concat_real).detach()
+        # print("Output real shape: " + str(output_real.shape))
+        # print("concat_syn_embeddings shape: " + str(concat_syn_embeddings.shape))
+        loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(concat_syn_embeddings, dim=1))**2)
+        optimizer_syn.zero_grad()
+        loss.backward()
+        optimizer_syn.step()
 
     if iter_num % 10 == 0:
         print("Iteration " + str(iter_num) + ", Loss: " + str(loss.item()))

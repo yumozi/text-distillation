@@ -271,31 +271,7 @@ class Transformer(nn.Module):
             self.last_loss = None
 
         return logits
-    
-    def forward(self, tokens: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
-        _bsz, seqlen = tokens.shape
-        h = self.tok_embeddings(tokens)
-        h = self.dropout(h)
 
-        freqs_cos = self.freqs_cos[:seqlen]
-        freqs_sin = self.freqs_sin[:seqlen]
-
-        for layer in self.layers:
-            h = layer(h, freqs_cos, freqs_sin)
-        h = self.norm(h)
-
-        if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.output(h)
-            self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-
-        else:
-            # inference-time mini-optimization: only forward the output on the very last position
-            logits = self.output(h[:, [-1], :]) # note: using list [-1] to preserve the time dim
-            self.last_loss = None
-
-        return logits
-    
     def forward_using_embeddings(self, embeddings: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
         _bsz, seqlen, _ = embeddings.shape
         h = self.dropout(embeddings)
@@ -321,8 +297,20 @@ class Transformer(nn.Module):
         """
         Given a tensor of embeddings, decode them into a sequence of token IDs to the best extent.
         """
-        logits = self.forward_using_embeddings(embeddings)
-        return torch.argmax(logits, dim=-1)
+        _bsz, seqlen, _ = embeddings.shape
+        h = self.dropout(embeddings)
+        freqs_cos = self.freqs_cos[:seqlen]
+        freqs_sin = self.freqs_sin[:seqlen]
+
+        for layer in self.layers:
+            h = layer(h, freqs_cos, freqs_sin)
+        h = self.norm(h)
+
+        # return the top token for each position
+
+        logits = self.output(h)
+
+        return logits.argmax(dim=-1)
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters

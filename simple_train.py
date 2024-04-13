@@ -45,7 +45,7 @@ dropout = 0.0
 # adamw optimizer
 gradient_accumulation_steps = 4  # used to simulate larger batch sizes
 learning_rate = 5e-4  # max learning rate
-max_iters = 500  # total number of training iterations
+max_iters = 1000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -213,23 +213,55 @@ if wandb_log:
 # ╚██████╗╚██████╔╝██║ ╚████║██████╔╝███████╗██║ ╚████║███████║███████╗
 #  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
 
-NUM_CONDENSED_DATA = batch_size
-LR_SYN = 200
+NUM_CONDENSED_DATA = 32 # number of sentences in synthetic data
+LR_SYN = 0.1
 MOMENTUM = 0.5
-REAL_INIT = True
+REAL_INIT = False
+VISUALIZATION_NUM = 1 # how many synthetic data to visualize
+
+def visualize_embeddings(embeddings):
+    X_syn_embeddings = embeddings[:, :-1].contiguous()  
+    Y_syn_embeddings = embeddings[:, 1:].contiguous()
+
+    X_syn_decoded = model.decode_embeddings(X_syn_embeddings)
+    Y_syn_decoded = model.decode_embeddings(Y_syn_embeddings)
+
+    concat_syn_decoded = torch.cat((X_syn_decoded, Y_syn_decoded[:, -1].unsqueeze(1)), dim=1) # [32, 257, 32000]
+
+    for i in range(VISUALIZATION_NUM):
+        sentence = ''.join(tokenizer.decode(concat_syn_decoded[i].tolist()))
+        print(sentence)
 
 # If REAL_INIT, initialize synthetic data with real data
+print("Building initial synthetic data...") # synthetic data is (NUM_CONDENSED_DATA, max_seq_len)
 if REAL_INIT:
-    X, Y = next(iter_batches(split="train"))
+    syn_init_batches = partial(
+        Task.iter_batches,
+        batch_size=1,
+        max_seq_len=max_seq_len,
+        vocab_size=vocab_size,
+        vocab_source=vocab_source,
+        device=device,
+        num_workers=0,
+    )
+    
+    syn_batch_iter = syn_init_batches(split="train")
+    for i in range(NUM_CONDENSED_DATA):
+        X, Y = next(syn_batch_iter)
+        if i == 0:
+            X_syn = X
+            Y_syn = Y
+        else:
+            X_syn = torch.cat((X_syn, X), dim=0)
+            Y_syn = torch.cat((Y_syn, Y), dim=0)
 else:
-    X = torch.randint(0, 32000, (NUM_CONDENSED_DATA, 256), device=device)
-    Y = torch.randint(0, 32000, (NUM_CONDENSED_DATA, 256), device=device)
+    X_syn = torch.randint(0, vocab_size, (NUM_CONDENSED_DATA, max_seq_len), device=device)
+    Y_syn = torch.randint(0, vocab_size, (NUM_CONDENSED_DATA, max_seq_len), device=device)
+
 
 # Instead of optimizing tokens, we have to optimize embeddings
-concat_syn = torch.cat((X, Y[:, -1].unsqueeze(1)), dim=1)
-# X_syn_embeddings = model.tok_embeddings(X).detach().clone().requires_grad_(True)
-# Y_syn = Y
-concat_syn_embeddings = model.tok_embeddings(concat_syn).detach().clone().requires_grad_(True)
+concat_syn = torch.cat((X_syn, Y_syn[:, -1].unsqueeze(1)), dim=1) # [500, 257]
+concat_syn_embeddings = model.tok_embeddings(concat_syn).detach().clone().requires_grad_(True) # [500, 257, 288]
 
 # X, Y each are (batch_size, max_seq_len), need to combine to get (batch_size, max_seq_len + 1 
 # by adding the last token of Y to the end of X
@@ -241,11 +273,8 @@ criterion = torch.nn.CrossEntropyLoss().to(device)
 
 tokenizer = Tokenizer()
 
-# split x from concat
-X_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous()
-print("Word form of Synthetic data embeddings:" + ' '.join(tokenizer.decode(model.decode_embeddings(X_syn_embeddings).long().tolist())))
-print("Original Synthetic data words:" + ''.join(tokenizer.decode(X[0].long().tolist())))
-
+print("Initial synthetic data is: ")
+visualize_embeddings(concat_syn_embeddings)
 
 # ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ 
 # ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝ 
@@ -254,6 +283,7 @@ print("Original Synthetic data words:" + ''.join(tokenizer.decode(X[0].long().to
 #    ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
 #    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
                                                             
+syn_loader = torch.utils.data.DataLoader(concat_syn_embeddings, batch_size=batch_size, shuffle=True)
 train_batch_iter = iter_batches(split="train")
 
 # X is (batch_size, max_seq_len) and Y is (batch_size, max_seq_len)
@@ -264,34 +294,23 @@ local_iter_num = 0  # number of iterations in the lifetime of this process
 raw_model = model  # unwrap DDP container if needed
 running_mfu = -1.0
 
+
 while True:
     if iter_num == 0 and eval_only:
         break
     
-    X, Y = next(train_batch_iter)
-    X_real, Y_real = X, Y
-    concat_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1)
+    X_real, Y_real = next(train_batch_iter) # [32, 256], [32, 256]
+    concat_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1) # [32, 257]
 
-    
-    # SAMPLE BATCH OF SYNTHETIC DATA - in progress
-    # syn_loader = torch.utils.data.DataLoader(syn_data, batch_size=batch_size, shuffle=True)
-    # syn = next(iter(syn_loader))
-    # X_syn = syn[:, :-1].contiguous() # need contiguous to make stride (256, 1) instead of (257, 1)
-    # Y_syn = syn[:, 1:].contiguous()
-
-    # Since synthetic data has same number as batch size
-    # we don't need to sample a batch of synthetic data
-    # X_syn = syn_data[:, :-1].contiguous() # need contiguous to make stride (256, 1) instead of (257, 1)
-    # Y_syn = syn_data[:, 1:].contiguous().detach()
+    # Randomly sample a batch of synthetic embeddings
+    batch_syn_embeddings = next(iter(syn_loader)) # [32, 257, 288]
 
     model_syn = Transformer(gptconf).to(device)
     
     with ctx:
         embed = model_syn.tok_embeddings
-        output_real = embed(concat_real).detach()
-        # print("Output real shape: " + str(output_real.shape))
-        # print("concat_syn_embeddings shape: " + str(concat_syn_embeddings.shape))
-        loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(concat_syn_embeddings, dim=1))**2)
+        output_real = embed(concat_real).detach() # [32, 257, 288]
+        loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(batch_syn_embeddings, dim=1))**2)
         optimizer_syn.zero_grad()
         loss.backward()
         optimizer_syn.step()
@@ -299,12 +318,9 @@ while True:
     if iter_num % 10 == 0:
         print("Iteration " + str(iter_num) + ", Loss: " + str(loss.item()))
 
-    if iter_num % 100 == 0:
+    if iter_num % 100 == 0 and iter_num != 0:
         print("Synthetic data at Iteration " + str(iter_num) + ":")
-        X_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous()
-        tokens = model.decode_embeddings(X_syn_embeddings).long().tolist()
-        print(' '.join(tokenizer.decode(tokens)))
-        print("\n")
+        visualize_embeddings(concat_syn_embeddings)
 
     iter_num += 1
 
@@ -319,6 +335,21 @@ while True:
 # ███████╗ ╚████╔╝ ██║  ██║███████╗╚██████╔╝██║  ██║   ██║   ██║╚██████╔╝██║ ╚████║
 # ╚══════╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
 
+# Save the synthetic embeddings as text in syn.txt
+X_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous()
+Y_syn_embeddings = concat_syn_embeddings[:, 1:].contiguous()
+
+# Add the last token of Y to the end of X
+X_syn_decoded = model.decode_embeddings(X_syn_embeddings)
+Y_syn_decoded = model.decode_embeddings(Y_syn_embeddings)
+
+concat_syn_decoded = torch.cat((X_syn_decoded, Y_syn_decoded[:, -1].unsqueeze(1)), dim=1) # [32, 257, 32000]
+
+with open("syn.txt", "w") as f:
+    for i in range(NUM_CONDENSED_DATA):
+        sentence = ''.join(tokenizer.decode(concat_syn_decoded[i].tolist()))
+        f.write(sentence + "\n\n")
+
 LOG_ITER = 50
 SAVE_ITER = 250
 TRAIN_ITER = 1000
@@ -329,7 +360,6 @@ X_syn_embeddings, Y_syn_embeddings = concat_syn_embeddings[:, :-1].contiguous(),
 # Important: Try to see what will the model work just with embeddings instead of tokens
 X, Y = model.decode_embeddings(X_syn_embeddings), model.decode_embeddings(Y_syn_embeddings)
 
-# remove inner list
 X.unsqueeze(0)
 Y.unsqueeze(0)
 
@@ -352,15 +382,15 @@ for i in range(TRAIN_ITER):
             torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
             model_export(raw_model, os.path.join(out_dir, "model.bin"), version=0)
 
-    # Split syn into X and Y
-    # X = torch.tensor(syn_data[:-1], device=device).unsqueeze(0)
-    # Y = torch.tensor(syn_data[1:], device=device).unsqueeze(0)
+    # Grab a batch of synthetic data
+    batch_syn_decoded = next(iter(syn_loader))
+    X_syn, Y_syn = batch_syn_decoded[:, :-1].contiguous(), batch_syn_decoded[:, 1:].contiguous()
 
     # Training
     total_loss = 0
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
-            logits = model(X, Y)
+            logits = model(X_syn, Y_syn)
             loss = model.last_loss
             loss = loss / gradient_accumulation_steps
             total_loss += loss

@@ -34,8 +34,8 @@ wandb_run_name = "run" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 # data
 batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
 max_seq_len = 256
-vocab_source = "llama2" # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
-vocab_size = 32000 # the Llama 2 tokenizer has 32K tokens
+vocab_source = "llama2"  # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
+vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
 # model
 dim = 288
 n_layers = 6
@@ -84,7 +84,8 @@ ddp_world_size = 1
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * max_seq_len
 
 print(f"tokens per iteration will be: {tokens_per_iter:,}")
-print(f"breaks down as: {gradient_accumulation_steps} grad accum steps * {ddp_world_size} processes * {batch_size} batch size * {max_seq_len} max seq len")
+print(
+    f"breaks down as: {gradient_accumulation_steps} grad accum steps * {ddp_world_size} processes * {batch_size} batch size * {max_seq_len} max seq len")
 
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(1337 + seed_offset)
@@ -149,7 +150,7 @@ elif init_from == "resume":
     unwanted_prefix = "_orig_mod."
     for k, v in list(state_dict.items()):
         if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
     model.load_state_dict(state_dict)
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
@@ -170,6 +171,7 @@ if compile:
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss():
@@ -188,6 +190,7 @@ def estimate_loss():
     model.train()
     return out
 
+
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(it):
     # 1) linear warmup for warmup_iters steps
@@ -202,23 +205,26 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+
 # logging
 if wandb_log:
     import wandb
+
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 #  ██████╗ ██████╗ ███╗   ██╗██████╗ ███████╗███╗   ██╗███████╗███████╗
 # ██╔════╝██╔═══██╗████╗  ██║██╔══██╗██╔════╝████╗  ██║██╔════╝██╔════╝
-# ██║     ██║   ██║██╔██╗ ██║██║  ██║█████╗  ██╔██╗ ██║███████╗█████╗  
-# ██║     ██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██║╚██╗██║╚════██║██╔══╝  
+# ██║     ██║   ██║██╔██╗ ██║██║  ██║█████╗  ██╔██╗ ██║███████╗█████╗
+# ██║     ██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██║╚██╗██║╚════██║██╔══╝
 # ╚██████╗╚██████╔╝██║ ╚████║██████╔╝███████╗██║ ╚████║███████║███████╗
 #  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
 # Condense
-NUM_CONDENSED_DATA = 32 # number of sentences in synthetic data
+NUM_CONDENSED_DATA = 32  # number of sentences in synthetic data
 LR_SYN = 100
 MOMENTUM = 0.5
 REAL_INIT = True
-VISUALIZATION_NUM = 1 # how many synthetic data to visualize
+VISUALIZATION_NUM = 1  # how many synthetic data to visualize
+
 
 def decode_syn_embedding(XY_syn_embeddings):
     """
@@ -234,6 +240,7 @@ def decode_syn_embedding(XY_syn_embeddings):
 
     return concat_syn
 
+
 def visualize_embeddings(XY_syn_embeddings):
     """
     Print the synthetic data in text form.
@@ -245,8 +252,9 @@ def visualize_embeddings(XY_syn_embeddings):
         print(sentence)
     print("\n")
 
+
 # If REAL_INIT, initialize synthetic data with real data
-print("Building initial synthetic data...") # synthetic data is (NUM_CONDENSED_DATA, max_seq_len)
+print("Building initial synthetic data...")  # synthetic data is (NUM_CONDENSED_DATA, max_seq_len)
 if REAL_INIT:
     syn_init_batches = partial(
         Task.iter_batches,
@@ -257,7 +265,7 @@ if REAL_INIT:
         device=device,
         num_workers=0,
     )
-    
+
     syn_batch_iter = syn_init_batches(split="train")
     for i in range(NUM_CONDENSED_DATA):
         X, Y = next(syn_batch_iter)
@@ -271,12 +279,11 @@ else:
     X_syn = torch.randint(0, vocab_size, (NUM_CONDENSED_DATA, max_seq_len), device=device)
     Y_syn = torch.randint(0, vocab_size, (NUM_CONDENSED_DATA, max_seq_len), device=device)
 
-
 # Instead of optimizing tokens, we have to optimize embeddings
-XY_syn = torch.cat((X_syn, Y_syn[:, -1].unsqueeze(1)), dim=1) # [500, 257]
+XY_syn = torch.cat((X_syn, Y_syn[:, -1].unsqueeze(1)), dim=1)  # [500, 257]
 
 # NOTE: THIS IS THE ACTUAL SYNTHETIC DATA WE ARE OPTIMIZING
-XY_syn_embeddings = model.tok_embeddings(XY_syn).detach().clone().requires_grad_(True) # [500, 257, 288]
+XY_syn_embeddings = model.tok_embeddings(XY_syn).detach().clone().requires_grad_(True)  # [500, 257, 288]
 
 optimizer_syn = torch.optim.SGD([XY_syn_embeddings], lr=LR_SYN, momentum=MOMENTUM)
 optimizer_syn.zero_grad()
@@ -287,14 +294,14 @@ tokenizer = Tokenizer()
 print("Initial synthetic data is: ")
 visualize_embeddings(XY_syn_embeddings)
 
-# ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ 
-# ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝ 
+# ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗
+# ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝
 #    ██║   ██████╔╝███████║██║██╔██╗ ██║██║██╔██╗ ██║██║  ███╗
 #    ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║
 #    ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
-#    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
-                                                      
-model = Transformer(gptconf).to(device)                                                     
+#    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝
+
+model = Transformer(gptconf).to(device)
 syn_embedding_loader = torch.utils.data.DataLoader(XY_syn_embeddings, batch_size=batch_size, shuffle=True)
 
 train_batch_iter = iter_batches(split="train")
@@ -312,18 +319,19 @@ while True:
         break
 
     total_loss = 0
-    X_real, Y_real = next(train_batch_iter) # [32, 256], [32, 256]
-    XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1) # [32, 257]
+    X_real, Y_real = next(train_batch_iter)  # [32, 256], [32, 256]
+    XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1)  # [32, 257]
 
     # Randomly sample a batch of synthetic embeddings
-    syn_embeddings = next(iter(syn_embedding_loader)) # [32, 257, 288]
-    
+    syn_embeddings = next(iter(syn_embedding_loader))  # [32, 257, 288]
+
     # Train synthetic data
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
             embed = model.tok_embeddings
-            output_real = embed(XY_real).detach() # [32, 257, 288]
-        
+            output_real = embed(XY_real).detach()  # [32, 257, 288]
+
+
             # 1. Normal DM
             # loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(batch_syn_embeddings, dim=1))**2)
 
@@ -335,7 +343,7 @@ while True:
             # 3. Gradient Matching
             def match_loss(gw_syn, gw_real):
                 dis = torch.tensor(0.0).to(device)
-        
+
                 gw_real_vec = []
                 gw_syn_vec = []
                 for ig in range(len(gw_real)):
@@ -343,13 +351,14 @@ while True:
                     gw_syn_vec.append(gw_syn[ig].reshape((-1)))
                 gw_real_vec = torch.cat(gw_real_vec, dim=0)
                 gw_syn_vec = torch.cat(gw_syn_vec, dim=0)
-                dis = torch.sum((gw_syn_vec - gw_real_vec)**2)
+                dis = torch.sum((gw_syn_vec - gw_real_vec) ** 2)
                 return dis
+
 
             model_params = list(model.parameters())
             output_real = model(X_real, Y_real)
             loss_real = model.last_loss
-  
+
             gw_real = torch.autograd.grad(loss_real, model_params)
             gw_real = list((_.detach().clone() for _ in gw_real))
 
@@ -364,9 +373,9 @@ while True:
 
             total_loss += loss
 
-        X_real, Y_real = next(train_batch_iter) # [32, 256], [32, 256]
-        XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1) # [32, 257]
-        syn_embeddings = next(iter(syn_embedding_loader)) # [32, 257, 288]
+        X_real, Y_real = next(train_batch_iter)  # [32, 256], [32, 256]
+        XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1)  # [32, 257]
+        syn_embeddings = next(iter(syn_embedding_loader))  # [32, 257, 288]
 
         scaler.scale(loss).backward()
 
@@ -376,7 +385,7 @@ while True:
 
     if iter_num % 10 == 0:
         print("Distillation Iteration " + str(iter_num) + ", Loss: " + str(total_loss))
-    
+
     if iter_num % 100 == 0 and iter_num != 0:
         print("Synthetic data at Iteration " + str(iter_num) + ":")
         visualize_embeddings(XY_syn_embeddings)
@@ -391,9 +400,8 @@ while True:
     XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings).detach().clone()
     syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
 
-    model = train_syn(model, syn_loader, optimizer, iters=50, log_iters=10, gradient_accumulation_steps=4, verbose=False)
-
-    
+    model = train_syn(model, syn_loader, optimizer, iters=50, log_iters=10, gradient_accumulation_steps=4,
+                      verbose=False)
 
 # ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗██╗ ██████╗ ███╗   ██╗
 # ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║
@@ -418,8 +426,8 @@ log_iters = 10
 save_iters = 250
 train_iters = 1000
 train_epochs = 5
-                   
-model = Transformer(gptconf).to(device)                                                              
+
+model = Transformer(gptconf).to(device)
 syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
 
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
@@ -429,16 +437,16 @@ for epoch in range(train_epochs):
 
     # Save model
     if i % save_iters == 0 and i != 0:
-            checkpoint = {
-                "model": raw_model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "model_args": model_args,
-                "iter_num": iter_num,
-                "best_val_loss": best_val_loss,
-                "config": config,
-            }
-            print(f"saving checkpoint to {out_dir}")
-            torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
-            model_export(raw_model, os.path.join(out_dir, "model.bin"), version=0)
+        checkpoint = {
+            "model": raw_model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "model_args": model_args,
+            "iter_num": iter_num,
+            "best_val_loss": best_val_loss,
+            "config": config,
+        }
+        print(f"saving checkpoint to {out_dir}")
+        torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
+        model_export(raw_model, os.path.join(out_dir, "model.bin"), version=0)
 
     model = train_syn(model, syn_loader, optimizer, iters=50, log_iters=log_iters, gradient_accumulation_steps=4)

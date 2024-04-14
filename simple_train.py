@@ -55,7 +55,7 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 1000  # how many steps to warm up for
 # system
-device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16
 compile = True  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
@@ -96,7 +96,7 @@ ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torc
 ctx = (
     nullcontext()
     if device_type == "cpu"
-    else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    else torch.amp.autocast(device_type=device_type, dtype=torch.float16)
 )
 
 # task-specific setup
@@ -213,7 +213,7 @@ if wandb_log:
 # ██║     ██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██║╚██╗██║╚════██║██╔══╝  
 # ╚██████╗╚██████╔╝██║ ╚████║██████╔╝███████╗██║ ╚████║███████║███████╗
 #  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
-
+# Condense
 NUM_CONDENSED_DATA = 32 # number of sentences in synthetic data
 LR_SYN = 100
 MOMENTUM = 0.5
@@ -293,9 +293,10 @@ visualize_embeddings(XY_syn_embeddings)
 #    ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║
 #    ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
 #    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
-                                                            
+                                                      
 model = Transformer(gptconf).to(device)                                                     
 syn_embedding_loader = torch.utils.data.DataLoader(XY_syn_embeddings, batch_size=batch_size, shuffle=True)
+
 train_batch_iter = iter_batches(split="train")
 
 # X is (batch_size, max_seq_len) and Y is (batch_size, max_seq_len)
@@ -404,7 +405,11 @@ while True:
 
 XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings)
 
-with open("syn.txt", "w") as f:
+# with open("syn.txt", "w") as f:
+#     for i in range(NUM_CONDENSED_DATA):
+#         sentence = ''.join(tokenizer.decode(concat_syn_decoded[i].tolist()))
+#         f.write(sentence + "\n\n")
+with open("syn.txt", "w", encoding='utf-8') as f:
     for i in range(NUM_CONDENSED_DATA):
         sentence = ''.join(tokenizer.decode(XY_syn_decoded[i].tolist()))
         f.write(sentence + "\n\n")
@@ -416,6 +421,7 @@ train_epochs = 5
                    
 model = Transformer(gptconf).to(device)                                                              
 syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
+
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
 
 for epoch in range(train_epochs):

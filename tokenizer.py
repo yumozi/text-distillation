@@ -101,8 +101,8 @@ def calculate_text_similarity(text1: str, text2: str, tokenizer_model: str = Non
     """
     tokenizer = Tokenizer(tokenizer_model)
 
-    tokens1 = tokenizer.encode(text1, bos=False, eos=False)
-    tokens2 = tokenizer.encode(text2, bos=False, eos=False)
+    tokens1 = tokenizer.encode(text1, bos=True, eos=False)
+    tokens2 = tokenizer.encode(text2, bos=True, eos=False)
 
     vocab_size = tokenizer.n_words
     vec1 = vectorize(tokens1, vocab_size)
@@ -120,6 +120,6 @@ if __name__ == "__main__":
     t = Tokenizer(args.tokenizer_model)
     t.export()
 
-    # e.g.
+    # e.g. cosine similarity usage
     # similarity_score = calculate_text_similarity("Example text for analysis.", "text for.")
     # print(f"Cosine Similarity: {similarity_score}")

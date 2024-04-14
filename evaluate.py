@@ -81,7 +81,7 @@ def setup():
         exit(1)
 
     model = load_model(model_path=model_path, model_args=model_args, device=device)
-    tokenizer = Tokenizer()  # Ensure this is properly initialized in your environment
+    tokenizer = Tokenizer()
     return device, model, tokenizer
 
 
@@ -90,5 +90,5 @@ if __name__ == "__main__":
     device, model, tokenizer = setup()
 
     prompt = input("Enter your prompt: ")
-    generated_text = generate_text(prompt, model, tokenizer, max_length=30, device=device)
+    generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
     print("Generated Text:", generated_text.replace(prompt, ""))

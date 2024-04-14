@@ -61,6 +61,7 @@ def generate_text(prompt, model, tokenizer, max_length=256, device='cuda', tempe
     return generated_text
 
 if __name__ == "__main__":
+    # example usage
     model_path = os.path.join("out", "ckpt.pt")
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -82,6 +83,5 @@ if __name__ == "__main__":
     tokenizer = Tokenizer()  # Ensure this is properly initialized in your environment
 
     prompt = input("Enter your prompt: ")
-    generated_text = generate_text(prompt, model, tokenizer, device=device)
+    generated_text = generate_text(prompt, model, tokenizer, max_length=40, device=device)
     print("Generated Text:", generated_text)
-

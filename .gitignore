@@ -4,3 +4,4 @@ run
 runq
 *.pyc
 out/
+.DS_Store

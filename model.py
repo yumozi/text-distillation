@@ -248,51 +248,50 @@ class Transformer(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, inputs: torch.Tensor, targets: Optional[torch.Tensor] = None, eval_mode="token") -> torch.Tensor:
-        if eval_mode == "token":
-            _bsz, seqlen = inputs.shape
-            h = self.tok_embeddings(inputs)
-            h = self.dropout(h)
+    def forward(self, tokens: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
+        _bsz, seqlen = tokens.shape
+        h = self.tok_embeddings(tokens)
+        h = self.dropout(h)
 
-            freqs_cos = self.freqs_cos[:seqlen]
-            freqs_sin = self.freqs_sin[:seqlen]
+        freqs_cos = self.freqs_cos[:seqlen]
+        freqs_sin = self.freqs_sin[:seqlen]
 
-            for layer in self.layers:
-                h = layer(h, freqs_cos, freqs_sin)
-            h = self.norm(h)
+        for layer in self.layers:
+            h = layer(h, freqs_cos, freqs_sin)
+        h = self.norm(h)
 
-            if targets is not None:
-                # if we are given some desired targets also calculate the loss
-                logits = self.output(h)
-                self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+        if targets is not None:
+            # if we are given some desired targets also calculate the loss
+            logits = self.output(h)
+            self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
 
-            else:
-                # inference-time mini-optimization: only forward the output on the very last position
-                logits = self.output(h[:, [-1], :]) # note: using list [-1] to preserve the time dim
-                self.last_loss = None
-
-            return logits
         else:
-            _bsz, seqlen, _ = inputs.shape
-            h = self.dropout(inputs)
-            freqs_cos = self.freqs_cos[:seqlen]
-            freqs_sin = self.freqs_sin[:seqlen]
+            # inference-time mini-optimization: only forward the output on the very last position
+            logits = self.output(h[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            self.last_loss = None
 
-            for layer in self.layers:
-                h = layer(h, freqs_cos, freqs_sin)
-            h = self.norm(h)
+        return logits
 
-            if targets is not None:
-                # if we are given some desired targets also calculate the loss
-                logits = self.output(h)
-                # Use MSE to calculate the loss
-                self.last_loss = F.mse_loss(h.view(-1), targets.view(-1))
-            else:
-                # inference-time mini-optimization: only forward the output on the very last position
-                logits = self.output(h[:, [-1], :])  # note: using list [-1] to preserve the time dim
-                self.last_loss = None
+    def forward_using_embeddings(self, embeddings: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
+        _bsz, seqlen, _ = embeddings.shape
+        h = self.dropout(embeddings)
+        freqs_cos = self.freqs_cos[:seqlen]
+        freqs_sin = self.freqs_sin[:seqlen]
 
-            return logits
+        for layer in self.layers:
+            h = layer(h, freqs_cos, freqs_sin)
+        h = self.norm(h)
+
+        if targets is not None:
+            # if we are given some desired targets also calculate the loss
+            logits = self.output(h)
+            self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+        else:
+            # inference-time mini-optimization: only forward the output on the very last position
+            logits = self.output(h[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            self.last_loss = None
+
+        return logits
     
     def decode_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         """

@@ -45,6 +45,7 @@ def generate_text(prompt, model, tokenizer, max_length=256, device='cuda', tempe
     input_ids = tokenizer.encode(prompt, bos=True, eos=False)
     input_ids = torch.tensor(input_ids, device=device).unsqueeze(0)
     generated_ids = input_ids.clone()
+    max_length = max_length + input_ids.shape[1]
 
     model.eval()
     with torch.no_grad():
@@ -60,8 +61,8 @@ def generate_text(prompt, model, tokenizer, max_length=256, device='cuda', tempe
     generated_text = tokenizer.decode(generated_ids[0].tolist())
     return generated_text
 
-if __name__ == "__main__":
-    # example usage
+
+def setup():
     model_path = os.path.join("out", "ckpt.pt")
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -80,8 +81,14 @@ if __name__ == "__main__":
         exit(1)
 
     model = load_model(model_path=model_path, model_args=model_args, device=device)
-    tokenizer = Tokenizer()  # Ensure this is properly initialized in your environment
+    tokenizer = Tokenizer()
+    return device, model, tokenizer
+
+
+if __name__ == "__main__":
+    # example usage
+    device, model, tokenizer = setup()
 
     prompt = input("Enter your prompt: ")
-    generated_text = generate_text(prompt, model, tokenizer, max_length=40, device=device)
-    print("Generated Text:", generated_text)
+    generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
+    print("Generated Text:", generated_text.replace(prompt, ""))

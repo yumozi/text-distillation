@@ -21,20 +21,33 @@ class CommonsenseQADataset():
         for idx in range(len(self)):
             yield self[idx]
 
+
+def format_question_and_choices(question, choices):
+    formatted_text = f"Answer the question: {question}\n"
+
+    for index, choice in enumerate(choices):
+        letter = chr(65 + index)
+        formatted_text += f"{letter}. {choice}\n"
+
+    return formatted_text
+
+
+# tokenized model evaluation
 def evaluate(device, model, tokenizer, dataset):
     model.eval()
     correct = 0
     total = 0
     for question, choices, label in dataset:
         # generate answer text
-        longest_choice_len = max([len(choice.split()) for choice in choices])
-        generated_text = generate_text(question, model, tokenizer, max_length=longest_choice_len, device=device)
-        answer = generated_text.replace(question, "")
+        prompt = format_question_and_choices(question, choices)
+        generated_text = generate_text(prompt, model, tokenizer, max_length=10, device=device)
+        answer = generated_text
 
         # generate answer label
         similarity_probs = []
-        for choice in choices:
-            similarity_probs.append(calculate_text_similarity(answer, choice))
+        for index, choice in enumerate(choices):
+            letter = chr(65 + index)
+            similarity_probs.append(calculate_text_similarity(answer, f"{letter}: {choice}"))
         predicted_label = similarity_probs.index(max(similarity_probs))
 
         # check answer correctness
@@ -42,7 +55,8 @@ def evaluate(device, model, tokenizer, dataset):
             correct += 1
         total += 1
         if total % 50 == 0:
-            print(total, " questions evaluated")
+            print(total, "questions evaluated")
+            print("Accuracy:", 100 * correct / total)
 
     return 100 * correct / total
 

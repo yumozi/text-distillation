@@ -36,8 +36,8 @@ wandb_run_name = "run" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 # data
 batch_size = 32  # if gradient_accumulation_steps > 1, this is the micro-batch size
 max_seq_len = 256
-vocab_source = "llama2" # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
-vocab_size = 32000 # the Llama 2 tokenizer has 32K tokens
+vocab_source = "llama2"  # llama2|custom; use Lllama 2 vocab from Meta, or custom trained
+vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
 # model
 dim = 288
 n_layers = 6
@@ -86,7 +86,8 @@ ddp_world_size = 1
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * max_seq_len
 
 print(f"tokens per iteration will be: {tokens_per_iter:,}")
-print(f"breaks down as: {gradient_accumulation_steps} grad accum steps * {ddp_world_size} processes * {batch_size} batch size * {max_seq_len} max seq len")
+print(
+    f"breaks down as: {gradient_accumulation_steps} grad accum steps * {ddp_world_size} processes * {batch_size} batch size * {max_seq_len} max seq len")
 
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(1337 + seed_offset)
@@ -151,7 +152,7 @@ elif init_from == "resume":
     unwanted_prefix = "_orig_mod."
     for k, v in list(state_dict.items()):
         if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
     model.load_state_dict(state_dict)
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
@@ -172,6 +173,7 @@ if compile:
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss():
@@ -190,6 +192,7 @@ def estimate_loss():
     model.train()
     return out
 
+
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(it):
     # 1) linear warmup for warmup_iters steps
@@ -204,22 +207,26 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+
 # logging
 if wandb_log:
     import wandb
+
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 #  ██████╗ ██████╗ ███╗   ██╗██████╗ ███████╗███╗   ██╗███████╗███████╗
 # ██╔════╝██╔═══██╗████╗  ██║██╔══██╗██╔════╝████╗  ██║██╔════╝██╔════╝
-# ██║     ██║   ██║██╔██╗ ██║██║  ██║█████╗  ██╔██╗ ██║███████╗█████╗  
-# ██║     ██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██║╚██╗██║╚════██║██╔══╝  
+# ██║     ██║   ██║██╔██╗ ██║██║  ██║█████╗  ██╔██╗ ██║███████╗█████╗
+# ██║     ██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██║╚██╗██║╚════██║██╔══╝
 # ╚██████╗╚██████╔╝██║ ╚████║██████╔╝███████╗██║ ╚████║███████║███████╗
 #  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
+
 
 NUM_CONDENSED_DATA = 32 # number of sentences in synthetic data
 LR_SYN = 0.001
 REAL_INIT = True
-VISUALIZATION_NUM = 1 # how many synthetic data to visualize
+VISUALIZATION_NUM = 1  # how many synthetic data to visualize
+
 
 def fetch_pretrained_embeddings():
     ckpt_path = os.path.join(trained_dir, "ckpt.pt")
@@ -257,7 +264,9 @@ def decode_syn_embedding(XY_syn_embeddings, model):
 
     return concat_syn
 
+
 def visualize_embeddings(XY_syn_embeddings, model):
+
     """
     Print the synthetic data in text form.
     """
@@ -268,8 +277,9 @@ def visualize_embeddings(XY_syn_embeddings, model):
         print(sentence)
     print("\n")
 
+
 # If REAL_INIT, initialize synthetic data with real data
-print("Building initial synthetic data...") # synthetic data is (NUM_CONDENSED_DATA, max_seq_len)
+print("Building initial synthetic data...")  # synthetic data is (NUM_CONDENSED_DATA, max_seq_len)
 if REAL_INIT:
     syn_init_batches = partial(
         Task.iter_batches,
@@ -280,7 +290,7 @@ if REAL_INIT:
         device=device,
         num_workers=0,
     )
-    
+
     syn_batch_iter = syn_init_batches(split="train")
     for i in range(NUM_CONDENSED_DATA):
         X, Y = next(syn_batch_iter)
@@ -294,12 +304,11 @@ else:
     X_syn = torch.randint(0, vocab_size, (NUM_CONDENSED_DATA, max_seq_len), device=device)
     Y_syn = torch.randint(0, vocab_size, (NUM_CONDENSED_DATA, max_seq_len), device=device)
 
-
 # Instead of optimizing tokens, we have to optimize embeddings
-XY_syn = torch.cat((X_syn, Y_syn[:, -1].unsqueeze(1)), dim=1) # [500, 257]
+XY_syn = torch.cat((X_syn, Y_syn[:, -1].unsqueeze(1)), dim=1)  # [500, 257]
 
 # NOTE: THIS IS THE ACTUAL SYNTHETIC DATA WE ARE OPTIMIZING
-XY_syn_embeddings = model.tok_embeddings(XY_syn).detach().clone().requires_grad_(True) # [500, 257, 288]
+XY_syn_embeddings = model.tok_embeddings(XY_syn).detach().clone().requires_grad_(True)  # [500, 257, 288]
 
 optimizer_syn = torch.optim.SGD([XY_syn_embeddings], lr=LR_SYN)
 optimizer_syn.zero_grad()
@@ -308,12 +317,13 @@ criterion = torch.nn.CrossEntropyLoss().to(device)
 tokenizer = Tokenizer()
 
 
-# ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ 
-# ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝ 
+# ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗
+# ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝
 #    ██║   ██████╔╝███████║██║██╔██╗ ██║██║██╔██╗ ██║██║  ███╗
 #    ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║
 #    ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
 #    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+
 
 # Assign pretrained weights to model
 embedding_weights, output_weights = fetch_pretrained_embeddings()
@@ -422,6 +432,7 @@ while True:
         print("Distillation Iteration " + str(iter_num) + ", Loss: " + str(total_loss))
     
     if iter_num % 1 == 0:
+
         print("Synthetic data at Iteration " + str(iter_num) + ":")
         visualize_embeddings(XY_syn_embeddings, model_syn)
 
@@ -434,11 +445,10 @@ while True:
     # Train model
     XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings, model_syn).detach().clone()
     syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
-
+    
     # real_loader = torch.utils.data.DataLoader(XY_real, batch_size=batch_size, shuffle=True)
     
     model_syn = train_syn(model_syn, syn_loader, optimizer_model_syn, iters=1, log_iters=10, gradient_accumulation_steps=2, verbose=False)
-
 
 # ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗██╗ ██████╗ ███╗   ██╗
 # ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║
@@ -460,12 +470,14 @@ train_iters = 1000
 train_epochs = 10
 save_epochs = 1
 
+
 syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
 
 for epoch in range(train_epochs):
     print("=== Evaluation Epoch: ", epoch, " ===")
 
     # Save model
+
     if epoch % save_epochs == 0:
             checkpoint = {
                 "model": model.state_dict(),
@@ -480,3 +492,4 @@ for epoch in range(train_epochs):
             model_export(model, os.path.join(out_dir, "model.bin"), version=0)
 
     model = train_syn(model, syn_loader, optimizer, iters=10, log_iters=log_iters, gradient_accumulation_steps=2)
+

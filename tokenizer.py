@@ -6,9 +6,10 @@ import os
 import struct
 import argparse
 from typing import List
-import numpy as np
-from collections import Counter
 from sentencepiece import SentencePieceProcessor
+from transformers import AutoTokenizer, AutoModel
+import torch
+from torch.nn.functional import cosine_similarity
 
 TOKENIZER_MODEL = "tokenizer.model" # the llama sentencepiece tokenizer model
 
@@ -70,46 +71,25 @@ class Tokenizer:
                 f.write(struct.pack("fI", score, len(bytes)))
                 f.write(bytes)
 
+# Load model and tokenizer
+model_name = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
 
-def vectorize(tokens: List[int], vocab_size: int) -> np.array:
-    """Convert tokenized text to a vector."""
-    vector = np.zeros(vocab_size)
-    token_counts = Counter(tokens)
-    for token, count in token_counts.items():
-        vector[token] = count
-    return vector
+def calculate_text_similarity(text1, text2):
+    # Tokenize text
+    inputs1 = tokenizer(text1, return_tensors='pt', padding=True, truncation=True)
+    inputs2 = tokenizer(text2, return_tensors='pt', padding=True, truncation=True)
 
+    # Generate embeddings
+    with torch.no_grad():
+        embeddings1 = model(**inputs1).last_hidden_state.mean(dim=1)
+        embeddings2 = model(**inputs2).last_hidden_state.mean(dim=1)
 
-def cosine_similarity(vec1: np.array, vec2: np.array) -> float:
-    """Calculate cosine similarity between two vectors."""
-    if np.linalg.norm(vec1) == 0 or np.linalg.norm(vec2) == 0:
-        return 0.0
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+    # Calculate cosine similarity
+    similarity = cosine_similarity(embeddings1, embeddings2)
 
-
-def calculate_text_similarity(text1: str, text2: str, tokenizer_model: str = None) -> float:
-    """
-    Calculate the cosine similarity between two texts using a specified tokenizer model.
-
-    Args:
-    text1 (str): First text to compare.
-    text2 (str): Second text to compare.
-    tokenizer_model (str, optional): Path to a custom tokenizer model file. Defaults to None.
-
-    Returns:
-    float: Cosine similarity between the vector representations of text1 and text2.
-    """
-    tokenizer = Tokenizer(tokenizer_model)
-
-    tokens1 = tokenizer.encode(text1, bos=True, eos=False)
-    tokens2 = tokenizer.encode(text2, bos=True, eos=False)
-
-    vocab_size = tokenizer.n_words
-    vec1 = vectorize(tokens1, vocab_size)
-    vec2 = vectorize(tokens2, vocab_size)
-
-    similarity = cosine_similarity(vec1, vec2)
-    return similarity
+    return similarity.item()
 
 
 if __name__ == "__main__":
@@ -121,5 +101,7 @@ if __name__ == "__main__":
     t.export()
 
     # e.g. cosine similarity usage
-    # similarity_score = calculate_text_similarity("Example text for analysis.", "text for.")
-    # print(f"Cosine Similarity: {similarity_score}")
+    # text1 = "The weather is sunny."
+    # text2 = "It's a bright sunny day."
+    # similarity_score = calculate_text_similarity(text1, text2)
+    # print("Similarity Score:", similarity_score)

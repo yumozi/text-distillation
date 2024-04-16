@@ -12,7 +12,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from tinystories import Task
 from export import model_export
-from utils import train_syn
+from utils import train_syn, train_one_step
 
 from tokenizer import Tokenizer
 
@@ -22,7 +22,6 @@ import copy
 # -----------------------------------------------------------------------------
 # I/O
 out_dir = "out"
-trained_dir = "trained_out"
 eval_interval = 2000
 log_interval = 1
 eval_iters = 100
@@ -46,9 +45,9 @@ n_kv_heads = 6
 multiple_of = 32
 dropout = 0.0
 # adamw optimizer
-gradient_accumulation_steps = 2  # used to simulate larger batch sizes
+gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 learning_rate = 5e-4  # max learning rate
-max_iters = 100  # total number of training iterations
+max_iters = 10000  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -57,7 +56,7 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 1000  # how many steps to warm up for
 # system
-device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16
 compile = False  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
@@ -217,31 +216,9 @@ if wandb_log:
 #  ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚══════╝
 
 NUM_CONDENSED_DATA = 32 # number of sentences in synthetic data
-LR_SYN = 0.001
+LR_SYN = 1
 REAL_INIT = True
 VISUALIZATION_NUM = 1 # how many synthetic data to visualize
-
-def fetch_pretrained_embeddings():
-    ckpt_path = os.path.join(trained_dir, "ckpt.pt")
-    checkpoint = torch.load(ckpt_path, map_location=device)
-    checkpoint_model_args = checkpoint["model_args"]
-    # force these config attributes to be equal otherwise we can't even resume training
-    # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ["dim", "n_layers", "n_heads", "n_kv_heads", "vocab_size", "multiple_of", "max_seq_len"]:
-        model_args[k] = checkpoint_model_args[k]
-    # create the model
-    gptconf = ModelArgs(**model_args)
-    model = Transformer(gptconf)
-    state_dict = checkpoint["model"]
-    # fix the keys of the state dictionary :(
-    # honestly no idea how checkpoints sometimes get this prefix, have to debug more
-    unwanted_prefix = "_orig_mod."
-    for k, v in list(state_dict.items()):
-        if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
-    model.load_state_dict(state_dict)
-
-    return model.tok_embeddings.weight, model.output.weight
 
 def decode_syn_embedding(XY_syn_embeddings, model):
     """
@@ -314,22 +291,15 @@ tokenizer = Tokenizer()
 #    ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║
 #    ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝
 #    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ 
-
-# Assign pretrained weights to model
-embedding_weights, output_weights = fetch_pretrained_embeddings()
-model.tok_embeddings.weight = torch.nn.Parameter(embedding_weights)
-model.output.weight = torch.nn.Parameter(output_weights)
-
+                                                            
 # clone the model used to generate synthetic data
 model_syn = Transformer(gptconf).to(device)
 original_model_state_dict = copy.deepcopy(model.state_dict())
-
 # remove _orig_mod. prefix from the keys
 for k in list(original_model_state_dict.keys()):
     if k.startswith("_orig_mod."):
         original_model_state_dict[k[len("_orig_mod."):]] = original_model_state_dict.pop(k)
 model_syn.load_state_dict(original_model_state_dict)    
-
 optimizer_model_syn = model_syn.configure_optimizers(weight_decay, 5e-5, (beta1, beta2), device_type)
 
 print("Initial synthetic data is: ")
@@ -348,80 +318,46 @@ running_mfu = -1.0
 while True:
     if iter_num == 0 and eval_only:
         break
+    
     total_loss = 0
-
     X_real, Y_real = next(train_batch_iter) # [32, 256], [32, 256]
     XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1) # [32, 257]
+    model_syn = Transformer(gptconf).to(device)
+
+    # Randomly sample a batch of synthetic embeddings
     syn_embeddings = next(iter(syn_embedding_loader)) # [32, 257, 288]
-
-    for condense_step in range(5):
-        
-        # Train synthetic data
-        for micro_step in range(gradient_accumulation_steps):
-            with ctx:
-                embed = model_syn.tok_embeddings
-                output_real = embed(XY_real).detach() # [32, 257, 288]
-            
-                # 1. Normal DM
-                # loss = torch.sum((torch.mean(output_real, dim=1) - torch.mean(syn_embeddings, dim=1))**2)
-
-                # 2. DM per position
-                # squared_diff = (output_real - syn_embeddings) ** 2
-                # distance_per_position = torch.sum(squared_diff, dim=2)
-                # loss = torch.mean(distance_per_position, dim=1).mean()
-
-                # 3. Gradient Matching
-                def match_loss(gw_syn, gw_real):
-                    dis = torch.tensor(0.0).to(device)
-            
-                    gw_real_vec = []
-                    gw_syn_vec = []
-                    for ig in range(len(gw_real)):
-                        gw_real_vec.append(gw_real[ig].reshape((-1)))
-                        gw_syn_vec.append(gw_syn[ig].reshape((-1)))
-                    gw_real_vec = torch.cat(gw_real_vec, dim=0)
-                    gw_syn_vec = torch.cat(gw_syn_vec, dim=0)
-                    dis = torch.sum((gw_syn_vec - gw_real_vec)**2)
-                    return dis
-
-                model_params = list(model_syn.parameters())
-                output_real = model_syn(X_real, Y_real)
-                loss_real = model_syn.last_loss
     
-                gw_real = torch.autograd.grad(loss_real, model_params)
-                gw_real = list((_.detach().clone() for _ in gw_real))
+    # Train synthetic data
+    for micro_step in range(gradient_accumulation_steps):
+        with ctx:
+            embed = model_syn.tok_embeddings
+            output_real = embed(XY_real).detach() # [32, 257, 288]
 
-                X_syn_embeddings = syn_embeddings[:, :-1, :]
-                Y_syn_embeddings = syn_embeddings[:, 1:, :]
-                Y_syn = model_syn.decode_embeddings(Y_syn_embeddings)
-                output_syn = model_syn.forward_using_embeddings(X_syn_embeddings, Y_syn)
-                loss_syn = model_syn.last_loss
+            # Compute updated parameter with synthetic data
+            XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings, model_syn).detach().clone()
+            model_syn = train_one_step(model_syn, XY_syn_decoded, optimizer_model_syn)
+            
+            # Evaluate on real data
+            logits = model_syn(X_real, Y_real)
+            loss = model_syn.last_loss
 
-                gw_syn = torch.autograd.grad(loss_syn, model_params, create_graph=True)
-                loss = match_loss(gw_syn, gw_real)
-                loss = loss / gradient_accumulation_steps
+            loss = loss / gradient_accumulation_steps
 
-                total_loss += loss
+            total_loss += loss
+        
+        X_real, Y_real = next(train_batch_iter) # [32, 256], [32, 256]
+        XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1) # [32, 257]
+        syn_embeddings = next(iter(syn_embedding_loader)) # [32, 257, 288]
 
-            X_real, Y_real = next(train_batch_iter) # [32, 256], [32, 256]
-            XY_real = torch.cat((X_real, Y_real[:, -1].unsqueeze(1)), dim=1) # [32, 257]
-            syn_embeddings = next(iter(syn_embedding_loader)) # [32, 257, 288]
+        loss.backward()
 
-            loss.backward()
-
-        if grad_clip != 0.0:
-            torch.nn.utils.clip_grad_norm_([XY_syn_embeddings], grad_clip)
-
-        optimizer_syn.step()
-        optimizer_syn.zero_grad(set_to_none=True)
-
-        if condense_step % 1 == 0:
-            print("Distillation Iteration " + str(iter_num) + ", Step " + str(condense_step) + ", Loss: " + str(total_loss))
+    optimizer_syn.step()
+    optimizer_syn.zero_grad(set_to_none=True)
 
     if iter_num % 1 == 0:
         print("Distillation Iteration " + str(iter_num) + ", Loss: " + str(total_loss))
     
-    if iter_num % 1 == 0:
+    if iter_num % 50 == 0:
         print("Synthetic data at Iteration " + str(iter_num) + ":")
         visualize_embeddings(XY_syn_embeddings, model_syn)
 
@@ -432,12 +368,12 @@ while True:
         break
 
     # Train model
-    XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings, model_syn).detach().clone()
-    syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
+    # XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings, model_syn).detach().clone()
+    # syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
 
     # real_loader = torch.utils.data.DataLoader(XY_real, batch_size=batch_size, shuffle=True)
-    
-    model_syn = train_syn(model_syn, syn_loader, optimizer_model_syn, iters=1, log_iters=10, gradient_accumulation_steps=2, verbose=False)
+
+    # model_syn = train_syn(model_syn, syn_loader, optimizer_model_syn, iters=5, log_iters=10, gradient_accumulation_steps=4, verbose=False)
 
 
 # ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗██╗ ██████╗ ███╗   ██╗
@@ -457,7 +393,7 @@ with open("syn.txt", "w") as f:
 
 log_iters = 10
 train_iters = 1000
-train_epochs = 10
+train_epochs = 100
 save_epochs = 1
 
 syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)
@@ -479,4 +415,4 @@ for epoch in range(train_epochs):
             torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
             model_export(model, os.path.join(out_dir, "model.bin"), version=0)
 
-    model = train_syn(model, syn_loader, optimizer, iters=10, log_iters=log_iters, gradient_accumulation_steps=2)
+    model = train_syn(model, syn_loader, optimizer, iters=10, log_iters=log_iters, gradient_accumulation_steps=4)

@@ -263,7 +263,7 @@ class Transformer(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.output(h)
-            self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            self.last_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-1)
 
         else:
             # inference-time mini-optimization: only forward the output on the very last position
@@ -292,6 +292,28 @@ class Transformer(nn.Module):
             self.last_loss = None
 
         return logits
+    
+    def forward_using_embeddings_target(self, embeddings: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Both inputs and targets are embeddings.
+        """
+        _bsz, seqlen, _ = embeddings.shape
+        h = self.dropout(embeddings)
+        freqs_cos = self.freqs_cos[:seqlen]
+        freqs_sin = self.freqs_sin[:seqlen]
+
+        for layer in self.layers:
+            h = layer(h, freqs_cos, freqs_sin)
+        h = self.norm(h)
+
+        if targets is not None:
+            # directly compare last hidden state to targets
+            self.last_loss = F.mse_loss(h, targets)
+
+        else:
+            print("warning, must provide targets for this function")
+
+        return None
     
     def decode_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         """

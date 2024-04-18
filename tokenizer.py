@@ -115,10 +115,39 @@ def calculate_text_similarity(text1: str, text2: str, tokenizer_model: str = Non
     return similarity
 
 
+def calculate_similarity_with_ids(text, token_ids, tokenizer):
+    """
+    Calculate the cosine similarity between a piece of text and token IDs.
+
+    Args:
+        text (str): The text to compare.
+        token_ids (torch.Tensor or List[int]): The token IDs to compare.
+        tokenizer (Tokenizer): Tokenizer to encode the text.
+
+    Returns:
+        float: Cosine similarity between the vector representations of text and token IDs.
+    """
+    # Convert input text to token IDs using the tokenizer
+    text_token_ids = tokenizer.encode(text, bos=True, eos=True)
+
+    # Vectorize both sets of token IDs
+    vocab_size = tokenizer.n_words
+    vector1 = vectorize(text_token_ids, vocab_size)
+    vector2 = vectorize(token_ids if isinstance(token_ids, list) else token_ids.tolist(), vocab_size)
+
+    # Calculate cosine similarity
+    vec1 = np.array(vector1)
+    vec2 = np.array(vector2)
+    similarity = cosine_similarity(vec1, vec2)
+
+    return similarity
+
+
 # Load model and tokenizer
 model_name = "sentence-transformers/all-MiniLM-L6-v2"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
+
 
 def calculate_text_similarity2(text1, text2):
     # Tokenize text

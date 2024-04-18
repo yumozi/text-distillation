@@ -1,6 +1,6 @@
 from datasets import load_dataset
-from evaluate import generate_text, setup
-from tokenizer import calculate_text_similarity, calculate_text_similarity2
+from evaluate import generate_text, setup, generate_ids
+from tokenizer import calculate_text_similarity, calculate_text_similarity2, calculate_similarity_with_ids
 
 
 class CommonsenseQADataset():
@@ -38,34 +38,28 @@ def evaluate(device, model, tokenizer, dataset):
     correct = 0
     total = 0
     for question, choices, label in dataset:
-        # loop var
-        loop = True
-
         # generate answer text
         prompt = format_question_and_choices(question, choices)
         longest_choice_len = max([len(choice.split()) for choice in choices])
+        # generated_ids = generate_ids(prompt, model, tokenizer, max_length=longest_choice_len + 1, device=device)
         generated_text = generate_text(prompt, model, tokenizer, max_length=longest_choice_len + 1, device=device)
-        print(generated_text.replace(prompt, ""))
-        answer = generated_text
+        # generated_text = generate_text()
+        # print(prompt)
+        generated_text = generated_text.replace(prompt, "")
+        # print(generated_text)
 
         # generate answer label
         similarity_probs = []
         for index, choice in enumerate(choices):
-            letter = chr(65 + index)
-            similarity_probs.append(calculate_text_similarity(answer, f"{letter}: {choice}"))
+            # letter = chr(65 + index)
+            # similarity_probs.append(calculate_similarity_with_ids(f"{letter}: {choice}", generated_ids, tokenizer))
+            similarity_probs.append(calculate_text_similarity2(choice, generated_text))
 
-        # maxProb = max(similarity_probs)
-        # if similarity_probs.count(maxProb) > 1:
-        #     similarity_probs = []
-        #     for index, choice in enumerate(choices):
-        #         letter = chr(65 + index)
-        #         similarity_probs.append(calculate_text_similarity2(answer, f"{letter}: {choice}"))
-
-        # predicted_label = similarity_probs.index(max(similarity_probs))
-        predicted_labels = find_indices(similarity_probs, max(similarity_probs))
+        # predicted_labels = find_indices(similarity_probs, max(similarity_probs))
+        predicted_label = similarity_probs.index(max(similarity_probs))
 
         # check answer correctness
-        if label in predicted_labels:
+        if label == predicted_label:
             correct += 1
         total += 1
         if total % 50 == 0:
@@ -99,6 +93,9 @@ if __name__ == "__main__":
 
 # trained model:
 # Accuracy: 19.25%
+
+# trained model:
+# Accuracy: 31.78%
 
 # checking the shape of the data
 # def print_first_datapoint():

@@ -47,7 +47,7 @@ dropout = 0.0
 # adamw optimizer
 gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 learning_rate = 5e-4  # max learning rate
-max_iters = 10000  # total number of training iterations
+max_iters = 1  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -56,8 +56,8 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 1000  # how many steps to warm up for
 # system
-device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-dtype = "bfloat16"  # float32|bfloat16|float16
+device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+dtype = "float16"  # float32|bfloat16|float16
 compile = False  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [
@@ -386,14 +386,19 @@ while True:
 
 XY_syn_decoded = decode_syn_embedding(XY_syn_embeddings, model_syn)
 
-with open("syn.txt", "w") as f:
+# with open("syn.txt", "w") as f:
+#     for i in range(NUM_CONDENSED_DATA):
+#         sentence = ''.join(tokenizer.decode(XY_syn_decoded[i].tolist()))
+#         f.write(sentence + "\n\n")
+with open("syn.txt", "w", encoding='utf-8') as f:
     for i in range(NUM_CONDENSED_DATA):
         sentence = ''.join(tokenizer.decode(XY_syn_decoded[i].tolist()))
         f.write(sentence + "\n\n")
 
+
 log_iters = 10
 train_iters = 1000
-train_epochs = 100
+train_epochs = 1
 save_epochs = 1
 
 syn_loader = torch.utils.data.DataLoader(XY_syn_decoded, batch_size=batch_size, shuffle=True)

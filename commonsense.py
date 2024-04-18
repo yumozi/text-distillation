@@ -1,6 +1,6 @@
 from datasets import load_dataset
 from evaluate import generate_text, setup
-from tokenizer import calculate_text_similarity
+from tokenizer import calculate_text_similarity, calculate_text_similarity2
 
 
 class CommonsenseQADataset():
@@ -38,9 +38,14 @@ def evaluate(device, model, tokenizer, dataset):
     correct = 0
     total = 0
     for question, choices, label in dataset:
+        # loop var
+        loop = True
+
         # generate answer text
         prompt = format_question_and_choices(question, choices)
-        generated_text = generate_text(prompt, model, tokenizer, max_length=10, device=device)
+        longest_choice_len = max([len(choice.split()) for choice in choices])
+        generated_text = generate_text(prompt, model, tokenizer, max_length=longest_choice_len + 1, device=device)
+        print(generated_text.replace(prompt, ""))
         answer = generated_text
 
         # generate answer label
@@ -48,10 +53,19 @@ def evaluate(device, model, tokenizer, dataset):
         for index, choice in enumerate(choices):
             letter = chr(65 + index)
             similarity_probs.append(calculate_text_similarity(answer, f"{letter}: {choice}"))
-        predicted_label = similarity_probs.index(max(similarity_probs))
+
+        # maxProb = max(similarity_probs)
+        # if similarity_probs.count(maxProb) > 1:
+        #     similarity_probs = []
+        #     for index, choice in enumerate(choices):
+        #         letter = chr(65 + index)
+        #         similarity_probs.append(calculate_text_similarity2(answer, f"{letter}: {choice}"))
+
+        # predicted_label = similarity_probs.index(max(similarity_probs))
+        predicted_labels = find_indices(similarity_probs, max(similarity_probs))
 
         # check answer correctness
-        if predicted_label == label:
+        if label in predicted_labels:
             correct += 1
         total += 1
         if total % 50 == 0:
@@ -60,6 +74,12 @@ def evaluate(device, model, tokenizer, dataset):
 
     return 100 * correct / total
 
+def find_indices(lst, value):
+    indices = []
+    for index, element in enumerate(lst):
+        if element == value:
+            indices.append(index)
+    return indices
 
 def main():
     # get device, model, tokenizer
@@ -77,6 +97,8 @@ def main():
 if __name__ == "__main__":
     main()
 
+# trained model:
+# Accuracy: 19.25%
 
 # checking the shape of the data
 # def print_first_datapoint():

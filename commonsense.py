@@ -40,29 +40,22 @@ def evaluate(device, model, tokenizer, dataset):
     for question, choices, label in dataset:
         # generate answer text
         prompt = format_question_and_choices(question, choices)
-        longest_choice_len = max([len(choice.split()) for choice in choices])
-        # generated_ids = generate_ids(prompt, model, tokenizer, max_length=longest_choice_len + 1, device=device)
-        generated_text = generate_text(prompt, model, tokenizer, max_length=longest_choice_len + 1, device=device)
-        # generated_text = generate_text()
-        # print(prompt)
+        generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
         generated_text = generated_text.replace(prompt, "")
-        # print(generated_text)
 
         # generate answer label
         similarity_probs = []
         for index, choice in enumerate(choices):
-            # letter = chr(65 + index)
-            # similarity_probs.append(calculate_similarity_with_ids(f"{letter}: {choice}", generated_ids, tokenizer))
-            similarity_probs.append(calculate_text_similarity2(choice, generated_text))
+            letter = chr(65 + index)
+            similarity_probs.append(calculate_text_similarity2(f"{letter}: {choice}", generated_text))
 
-        # predicted_labels = find_indices(similarity_probs, max(similarity_probs))
-        predicted_label = similarity_probs.index(max(similarity_probs))
+        predicted_labels = find_indices(similarity_probs, max(similarity_probs))
 
         # check answer correctness
-        if label == predicted_label:
+        if label in predicted_labels:
             correct += 1
         total += 1
-        if total % 50 == 0:
+        if total % 10 == 0:
             print(total, "questions evaluated")
             print("Accuracy:", 100 * correct / total)
 

@@ -114,7 +114,7 @@ def generate_ids(prompt, model, tokenizer, max_length=256, device='cuda', temper
             generated_ids = torch.cat((generated_ids, next_token_id), dim=1)
 
     # Return the tensor containing the generated token IDs
-    return generated_ids.squeeze(0)
+    return generated_ids.squeeze(0)[len(input_ids[0]):]
 
 
 def setup():

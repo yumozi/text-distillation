@@ -21,6 +21,12 @@ The pretraining stage.
 python3 train.py
 ```
 This will output a model into /trained_out.
+Note: Change these three variables if you want to use gpu or speed up the training
+```
+device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+dtype = "bfloat16"  # float32|bfloat16|float16
+compile = False  # use PyTorch 2.0 to compile the model to be faster
+```
 
 ### Condense dataset
 The condensation stage. Before you run this you have to have the pretrained model in /trained_out

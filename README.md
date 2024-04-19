@@ -21,7 +21,7 @@ The pretraining stage.
 python3 train.py
 ```
 This will output a model into /trained_out.
-Note: Change these three variables if you want to use gpu or speed up the training
+Note: Change these three variables if you want to use gpu or speed up the training. Same with condense dataset
 ```
 device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16

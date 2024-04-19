@@ -59,11 +59,6 @@ def evaluate(model, device, dataloader, tokenizer, temperature=0.9, top_k=100):
 
             total += targets.size(0)
 
-            if batch_index < 5:
-                print(f"Batch {batch_index + 1}: Predictions: {predictions}, Predicted words: {predicted_words}")
-                print(f"Targets: {targets}, Target words: {target_words}")
-                print(f"Similar predictions this batch: {similar_count}")
-
     accuracy = 100 * similar_count / total
     print(f"Completed model evaluation. Similarity-based Accuracy: {accuracy:.2f}%")
     return accuracy

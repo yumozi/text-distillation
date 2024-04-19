@@ -190,10 +190,7 @@ if REAL_INIT:
         Task.iter_batches,
         batch_size=1,
         max_seq_len=max_seq_len,
-        vocab_size=vocab_size,
-        vocab_source=vocab_source,
         device=device,
-        num_workers=0,
     )
     
     syn_batch_iter = syn_init_batches(split="train")

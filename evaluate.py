@@ -2,6 +2,7 @@ import torch
 import os
 from model import Transformer, ModelArgs
 from tokenizer import Tokenizer
+from torch.nn.functional import softmax
 
 def load_model(model_path, model_args, device='cuda'):
     """
@@ -26,6 +27,7 @@ def load_model(model_path, model_args, device='cuda'):
         print(f"Failed to load model from {model_path}: {e}")
         exit(1)
 
+
 def generate_text(prompt, model, tokenizer, max_length=256, device='cuda', temperature=1.0, top_k=50):
     """
     Generate text from a prompt using the specified model.
@@ -42,24 +44,77 @@ def generate_text(prompt, model, tokenizer, max_length=256, device='cuda', tempe
     Returns:
         str: The generated text.
     """
+    # Encode the initial prompt to a sequence of IDs and ensure it is on the correct device
     input_ids = tokenizer.encode(prompt, bos=True, eos=False)
     input_ids = torch.tensor(input_ids, device=device).unsqueeze(0)
     generated_ids = input_ids.clone()
-    max_length = max_length + input_ids.shape[1]
+    max_length += input_ids.shape[1]
 
-    model.eval()
+    model.eval()  # Ensure the model is in evaluation mode
     with torch.no_grad():
         while len(generated_ids[0]) < max_length:
-            logits = model(generated_ids)
-            next_token_logits = logits[:, -1, :] / temperature
-            indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
-            next_token_logits[indices_to_remove] = -float('Inf')
-            probs = torch.nn.functional.softmax(next_token_logits, dim=-1)
-            next_token_id = torch.multinomial(probs, num_samples=1)
+            logits = model(generated_ids)[:, -1, :]  # Obtain logits for the last token in the sequence
+            # Scale logits by temperature and apply top-k filtering
+            scaled_logits = logits / temperature
+            top_k_values, top_k_indices = torch.topk(scaled_logits, top_k)
+            # Create a distribution to sample from using the top-k logits
+            probs = torch.nn.functional.softmax(top_k_values, dim=-1)
+            next_token_id = top_k_indices.gather(-1, torch.multinomial(probs, 1))
+
+            # Check if the generated token is an end-of-sequence token
+            if next_token_id == tokenizer.eos_id:
+                break
+
+            # Append the generated token ID to the sequence
             generated_ids = torch.cat((generated_ids, next_token_id), dim=1)
 
+    # Decode the sequence of IDs back to text
     generated_text = tokenizer.decode(generated_ids[0].tolist())
     return generated_text
+
+
+def generate_ids(prompt, model, tokenizer, max_length=256, device='cuda', temperature=1.0, top_k=50):
+    """
+    Generate token IDs from a prompt using the specified model.
+
+    Args:
+        prompt (str): Initial text to start generating from.
+        model (torch.nn.Module): The trained model.
+        tokenizer (Tokenizer): Tokenizer for encoding and decoding text.
+        max_length (int): Maximum length of the generated token IDs.
+        device (str): Device the model is on.
+        temperature (float): Softmax temperature for generation diversity.
+        top_k (int): The number of highest probability vocabulary tokens to keep for sampling.
+
+    Returns:
+        torch.Tensor: Tensor containing the generated token IDs.
+    """
+    # Encode the initial prompt to a sequence of IDs and ensure it is on the correct device
+    input_ids = tokenizer.encode(prompt, bos=True, eos=False)
+    input_ids = torch.tensor(input_ids, device=device).unsqueeze(0)
+    generated_ids = input_ids.clone()
+    max_length += input_ids.shape[1]
+
+    model.eval()  # Ensure the model is in evaluation mode
+    with torch.no_grad():
+        while len(generated_ids[0]) < max_length:
+            logits = model(generated_ids)[:, -1, :]  # Obtain logits for the last token in the sequence
+            # Scale logits by temperature and apply top-k filtering
+            scaled_logits = logits / temperature
+            top_k_values, top_k_indices = torch.topk(scaled_logits, top_k)
+            # Create a distribution to sample from using the top-k logits
+            probs = torch.nn.functional.softmax(top_k_values, dim=-1)
+            next_token_id = top_k_indices.gather(-1, torch.multinomial(probs, 1))
+
+            # Check if the generated token is an end-of-sequence token
+            if next_token_id == tokenizer.eos_id:
+                break
+
+            # Append the generated token ID to the sequence
+            generated_ids = torch.cat((generated_ids, next_token_id), dim=1)
+
+    # Return the tensor containing the generated token IDs
+    return generated_ids.squeeze(0)[len(input_ids[0]):]
 
 
 def setup():

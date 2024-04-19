@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, Tensor
 
 import pdb
 
@@ -50,10 +50,13 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
 
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     ndim = x.ndim
+    # print("freqs_cis.shape", freqs_cis.shape)
+    # print("xshape", (x.shape[1], x.shape[-1]))
     assert 0 <= 1 < ndim
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(shape)
+
 
 def apply_rotary_emb(
     xq: torch.Tensor,
@@ -253,6 +256,8 @@ class Transformer(nn.Module):
         h = self.tok_embeddings(tokens)
         h = self.dropout(h)
 
+        # print("h shape", h.shape)
+
         freqs_cos = self.freqs_cos[:seqlen]
         freqs_sin = self.freqs_sin[:seqlen]
 
@@ -263,7 +268,8 @@ class Transformer(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.output(h)
-            self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            # self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            self.last_loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1), ignore_index=-1)
 
         else:
             # inference-time mini-optimization: only forward the output on the very last position

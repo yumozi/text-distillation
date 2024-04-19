@@ -1,6 +1,7 @@
 from datasets import load_dataset
-from evaluate import generate_text, setup
-from tokenizer import calculate_text_similarity
+from evaluate import generate_text, setup, generate_ids
+from tokenizer import calculate_text_similarity, calculate_text_similarity2, calculate_similarity_with_ids, Tokenizer, vectorize
+from torch.utils.data import Dataset
 
 
 class CommonsenseQADataset():
@@ -23,13 +24,53 @@ class CommonsenseQADataset():
 
 
 def format_question_and_choices(question, choices):
-    formatted_text = f"Answer the question: {question}\n"
+    """
+    Formats a given question and a list of answer choices into a single prompt string.
 
+    Args:
+        question (str): The text of the question.
+        choices (list of str): A list of answer choices.
+
+    Returns:
+        str: A formatted string with the question followed by each choice prefixed by a letter label.
+    """
+    # Start with the question, formatted to introduce it clearly
+    formatted_text = f"Question: {question}\n"
+
+    # Append each choice to the prompt, prefixed by a letter (A, B, C, etc.)
     for index, choice in enumerate(choices):
-        letter = chr(65 + index)
+        letter = chr(65 + index)  # 65 is ASCII for 'A'
         formatted_text += f"{letter}. {choice}\n"
 
     return formatted_text
+
+
+def pad_with_zeros(lst):
+    zeros_needed = 256 - len(lst)
+    zeros = [0] * max(zeros_needed, 0)
+    padded_list = zeros + lst
+    return padded_list
+
+
+class CommonsenseQADataloader(Dataset):
+    def __init__(self, data):
+        self.data = data
+        self.tokenizer = Tokenizer()
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        question = self.data[idx]['question']
+        choices = self.data[idx]['choices']['text']
+        label = ord(self.data[idx]['answerKey']) - ord('A') if self.data[idx]['answerKey'] else -1
+
+        prompt = format_question_and_choices(question, choices)
+        input_ids = self.tokenizer.encode(prompt, bos=True, eos=True)
+        target_ids = self.tokenizer.encode(choices[label], bos=True, eos=True)
+        target_ids = input_ids + target_ids
+
+        return pad_with_zeros(input_ids), pad_with_zeros(target_ids)
 
 
 # tokenized model evaluation
@@ -40,26 +81,33 @@ def evaluate(device, model, tokenizer, dataset):
     for question, choices, label in dataset:
         # generate answer text
         prompt = format_question_and_choices(question, choices)
-        generated_text = generate_text(prompt, model, tokenizer, max_length=10, device=device)
-        answer = generated_text
+        generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
+        generated_text = generated_text.replace(prompt, "")
 
         # generate answer label
         similarity_probs = []
         for index, choice in enumerate(choices):
             letter = chr(65 + index)
-            similarity_probs.append(calculate_text_similarity(answer, f"{letter}: {choice}"))
-        predicted_label = similarity_probs.index(max(similarity_probs))
+            similarity_probs.append(calculate_text_similarity2(f"{letter}. {choice}", generated_text))
+
+        predicted_labels = find_indices(similarity_probs, max(similarity_probs))
 
         # check answer correctness
-        if predicted_label == label:
+        if label in predicted_labels:
             correct += 1
         total += 1
-        if total % 50 == 0:
+        if total % 10 == 0:
             print(total, "questions evaluated")
             print("Accuracy:", 100 * correct / total)
 
     return 100 * correct / total
 
+def find_indices(lst, value):
+    indices = []
+    for index, element in enumerate(lst):
+        if element == value:
+            indices.append(index)
+    return indices
 
 def main():
     # get device, model, tokenizer
@@ -77,6 +125,11 @@ def main():
 if __name__ == "__main__":
     main()
 
+# trained model:
+# Accuracy: 19.25%
+
+# trained model:
+# Accuracy: 31.78%
 
 # checking the shape of the data
 # def print_first_datapoint():

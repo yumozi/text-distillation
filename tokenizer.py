@@ -9,7 +9,9 @@ from typing import List
 from sentencepiece import SentencePieceProcessor
 from transformers import AutoTokenizer, AutoModel
 import torch
-from torch.nn.functional import cosine_similarity
+from torch.nn.functional import cosine_similarity as cosine_similarity2
+import numpy as np
+from collections import Counter
 
 TOKENIZER_MODEL = "tokenizer.model" # the llama sentencepiece tokenizer model
 
@@ -71,12 +73,83 @@ class Tokenizer:
                 f.write(struct.pack("fI", score, len(bytes)))
                 f.write(bytes)
 
+
+def vectorize(tokens: List[int], vocab_size: int) -> np.array:
+    """Convert tokenized text to a vector."""
+    vector = np.zeros(vocab_size)
+    token_counts = Counter(tokens)
+    for token, count in token_counts.items():
+        vector[token] = count
+    return vector
+
+
+def cosine_similarity(vec1: np.array, vec2: np.array) -> float:
+    """Calculate cosine similarity between two vectors."""
+    if np.linalg.norm(vec1) == 0 or np.linalg.norm(vec2) == 0:
+        return 0.0
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+
+
+def calculate_text_similarity(text1: str, text2: str, tokenizer_model: str = None) -> float:
+    """
+    Calculate the cosine similarity between two texts using a specified tokenizer model.
+
+    Args:
+    text1 (str): First text to compare.
+    text2 (str): Second text to compare.
+    tokenizer_model (str, optional): Path to a custom tokenizer model file. Defaults to None.
+
+    Returns:
+    float: Cosine similarity between the vector representations of text1 and text2.
+    """
+    tokenizer = Tokenizer(tokenizer_model)
+
+    tokens1 = tokenizer.encode(text1, bos=True, eos=False)
+    tokens2 = tokenizer.encode(text2, bos=True, eos=False)
+
+    vocab_size = tokenizer.n_words
+    vec1 = vectorize(tokens1, vocab_size)
+    vec2 = vectorize(tokens2, vocab_size)
+
+    similarity = cosine_similarity(vec1, vec2)
+    return similarity
+
+
+def calculate_similarity_with_ids(text, token_ids, tokenizer):
+    """
+    Calculate the cosine similarity between a piece of text and token IDs.
+
+    Args:
+        text (str): The text to compare.
+        token_ids (torch.Tensor or List[int]): The token IDs to compare.
+        tokenizer (Tokenizer): Tokenizer to encode the text.
+
+    Returns:
+        float: Cosine similarity between the vector representations of text and token IDs.
+    """
+    # Convert input text to token IDs using the tokenizer
+    text_token_ids = tokenizer.encode(text, bos=True, eos=True)
+
+    # Vectorize both sets of token IDs
+    vocab_size = tokenizer.n_words
+    vector1 = vectorize(text_token_ids, vocab_size)
+    vector2 = vectorize(token_ids if isinstance(token_ids, list) else token_ids.tolist(), vocab_size)
+
+    # Calculate cosine similarity
+    vec1 = np.array(vector1)
+    vec2 = np.array(vector2)
+    similarity = cosine_similarity(vec1, vec2)
+
+    return similarity
+
+
 # Load model and tokenizer
 model_name = "sentence-transformers/all-MiniLM-L6-v2"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
 
-def calculate_text_similarity(text1, text2):
+
+def calculate_text_similarity2(text1, text2):
     # Tokenize text
     inputs1 = tokenizer(text1, return_tensors='pt', padding=True, truncation=True)
     inputs2 = tokenizer(text2, return_tensors='pt', padding=True, truncation=True)
@@ -87,7 +160,7 @@ def calculate_text_similarity(text1, text2):
         embeddings2 = model(**inputs2).last_hidden_state.mean(dim=1)
 
     # Calculate cosine similarity
-    similarity = cosine_similarity(embeddings1, embeddings2)
+    similarity = cosine_similarity2(embeddings1, embeddings2)
 
     return similarity.item()
 
@@ -103,5 +176,5 @@ if __name__ == "__main__":
     # e.g. cosine similarity usage
     # text1 = "The weather is sunny."
     # text2 = "It's a bright sunny day."
-    # similarity_score = calculate_text_similarity(text1, text2)
+    # similarity_score = calculate_text_similarity2(text1, text2)
     # print("Similarity Score:", similarity_score)

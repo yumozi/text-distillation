@@ -49,7 +49,7 @@ class Task:
             print(f"Encoded {split} data saved to {output_file}.")
 
     @staticmethod
-    def iter_batches(batch_size, max_seq_len, vocab_size, split='train', device='cpu'):
+    def iter_batches(batch_size, max_seq_len, split='train', device='cpu'):
         """Yields batches of data suitable for model training."""
         file_path = os.path.join(DATA_CACHE_DIR, f"wikitext-2_{split}.bin")
         data = np.fromfile(file_path, dtype=np.int16)

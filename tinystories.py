@@ -279,19 +279,3 @@ if __name__ == "__main__":
         pretokenize(vocab_size=args.vocab_size)
     else:
         raise ValueError(f"Unknown stage {args.stage}")
-
-# def display_batches(num_batches, batch_size, max_seq_len, vocab_size, split='train', vocab_source='custom', device='cpu'):
-#     # Display the specified number of batches using the iter_batches method from Task
-#     batch_count = 0
-#     for x, y in Task.iter_batches(batch_size=batch_size, device=device, num_workers=0, split=split, max_seq_len=max_seq_len, vocab_size=vocab_size, vocab_source=vocab_source):
-#         print(f"Batch {batch_count + 1}")
-#         print("Inputs (x):", x)
-#         print("Outputs (y):", y)
-#         print("-" * 50)
-#         batch_count += 1
-#         if batch_count >= num_batches:
-#             break
-#
-# # Example usage of the display_batches function
-# if __name__ == "__main__":
-#     display_batches(num_batches=5, batch_size=2, max_seq_len=256, vocab_size=2048, split='train', vocab_source='custom')

@@ -1,0 +1,7 @@
+__pycache__/
+.idea/
+data/
+syn.txt
+out/
+**/.DS_Store
+log/

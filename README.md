@@ -1,4 +1,4 @@
-## Text Distillation
+# Setup
 
 ### Environment setup
 ```
@@ -14,18 +14,32 @@ python3 wikitext.py download
 python3 wikitext.py encode_data
 ```
 
+# Training the Model
 ### Pre-trained Model
+The pretraining stage.
 ```
 python3 train.py
 ```
+This will output a model into /trained_out.
 
 ### Condense dataset
-Before run it before you have the pre-trained model in `/trained_out/`
+The condensation stage. Before you run this you have to have the pretrained model in /trained_out
 ```
 python3 condense.py
 ```
+This will output a model into /out. 
+
+# Evaluation
+### Finetuning
+To evaluate the model using commonsenseqa, we have to finetune it first.
+Remember to backup the ckpt.pt file in your out folder, if you still need it.
+```
+python3 commonsense_finetune.py
+```
+
 
 ### Evaluate model performance
+Run this to evaluate the model (that's currently in your out folder, called ckpt.pt) on commonsenseqa.
 ```
 python3 commonsense.py
 ```

@@ -81,11 +81,11 @@ def main():
     test_dataloader = DataLoader(test_dataset, batch_size=2, shuffle=False, collate_fn=custom_collate_fn)
 
     model_paths = [
-        # "trained_out/ckpt.pt",
+        "trained_out/ckpt.pt",
         "out/ckpt.pt"
     ]
     model_names = [
-        # "trained",
+        "trained",
         "untrained"
     ]
 

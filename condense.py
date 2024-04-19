@@ -12,7 +12,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from wikitext import Task
 from export import model_export
-from utils import train_syn, train_syn_embeddings, train_one_step, train_one_step_embeddings, decode_syn_embedding, visualize_embeddings
+from utils import train_one_step_embeddings, decode_syn_embedding, visualize_embeddings
 
 from tokenizer import Tokenizer
 

@@ -1,5 +1,5 @@
 from datasets import load_dataset
-from evaluate import generate_text, setup, generate_ids
+from evaluate import generate_text, setup, generate_ids, generate_text_model_ver
 from tokenizer import calculate_text_similarity, calculate_text_similarity2, calculate_similarity_with_ids, Tokenizer, vectorize
 from torch.utils.data import Dataset
 
@@ -81,7 +81,7 @@ def evaluate(device, model, tokenizer, dataset):
     for question, choices, label in dataset:
         # generate answer text
         prompt = format_question_and_choices(question, choices)
-        generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
+        generated_text = generate_text_model_ver(prompt, model, tokenizer, max_length=50, device=device)
         generated_text = generated_text.replace(prompt, "")
 
         # generate answer label

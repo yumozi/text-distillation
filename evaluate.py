@@ -117,6 +117,36 @@ def generate_ids(prompt, model, tokenizer, max_length=256, device='cuda', temper
     return generated_ids.squeeze(0)[len(input_ids[0]):]
 
 
+def generate_text_model_ver(prompt, model, tokenizer, device='cuda', max_length=256, temperature=1.0, top_k=50):
+    """
+    Generate text using the model based on a given prompt.
+
+    Args:
+        prompt (str): Text to start the generation from.
+        model (torch.nn.Module): The trained model instance.
+        tokenizer (Tokenizer): Tokenizer for encoding and decoding text.
+        device (str): Device to run the generation on ('cuda' or 'cpu').
+        max_length (int): Maximum length of the text to generate.
+        temperature (float): Temperature to control the diversity of the generation.
+        top_k (int): Limits the sampling pool to the top k predictions.
+
+    Returns:
+        str: The generated text.
+    """
+    # Encode the prompt to token IDs and ensure it is placed on the correct device
+    input_ids = tokenizer.encode(prompt, bos=True, eos=False)
+    input_ids = torch.tensor(input_ids, device=device).unsqueeze(0)
+
+    # Set the model to evaluation mode
+    model.eval()
+    with torch.no_grad():
+        generated_ids = model.generate(input_ids, max_new_tokens=max_length, temperature=temperature, top_k=top_k)
+
+    # Decode generated token IDs back to text
+    generated_text = tokenizer.decode(generated_ids[0].tolist())
+    return generated_text
+
+
 def setup():
     model_path = os.path.join("out", "ckpt.pt")
 
@@ -145,5 +175,6 @@ if __name__ == "__main__":
     device, model, tokenizer = setup()
 
     prompt = input("Enter your prompt: ")
-    generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
+    # generated_text = generate_text(prompt, model, tokenizer, max_length=20, device=device)
+    generated_text = generate_text_model_ver(prompt, model, tokenizer)
     print("Generated Text:", generated_text.replace(prompt, ""))

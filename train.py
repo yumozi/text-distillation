@@ -29,14 +29,15 @@ from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from tinystories import Task
+from wikitext import Task  # or import from wikitext if you want to train on WikiText-103
 from export import model_export
 
 # -----------------------------------------------------------------------------
 # I/O
-out_dir = "out"
+out_dir = "trained_out"
 eval_interval = 2000
 log_interval = 1
-eval_iters = 100
+eval_iters = 1
 eval_only = False  # if True, script exits right after the first eval
 always_save_checkpoint = False  # if True, always save a checkpoint after each eval
 init_from = "scratch"  # 'scratch' or 'resume'
@@ -68,9 +69,9 @@ grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
 decay_lr = True  # whether to decay the learning rate
 warmup_iters = 1000  # how many steps to warm up for
 # system
-device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = "cpu"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16
-compile = True  # use PyTorch 2.0 to compile the model to be faster
+compile = False  # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
 config_keys = [
     k
@@ -120,6 +121,8 @@ torch.manual_seed(1337 + seed_offset)
 torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = "cuda" if "cuda" in device else "cpu"  # for later use in torch.autocast
+if device == "cpu":
+    device_type = "cpu"
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
 ctx = (
@@ -133,10 +136,7 @@ iter_batches = partial(
     Task.iter_batches,
     batch_size=batch_size,
     max_seq_len=max_seq_len,
-    vocab_size=vocab_size,
-    vocab_source=vocab_source,
     device=device,
-    num_workers=0,
 )
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -212,7 +212,7 @@ if ddp:
 def estimate_loss():
     out = {}
     model.eval()
-    for split in ["train", "val"]:
+    for split in ["train", "validation"]:
         batch_iter = iter_batches(split=split)
         losses = torch.zeros(eval_iters)  # keep on CPU
         for k in range(eval_iters):
@@ -260,7 +260,7 @@ while True:
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['validation']:.4f}")
         if wandb_log:
             try:
                 wandb.log(
@@ -268,15 +268,15 @@ while True:
                         "iter": iter_num,
                         "tokens": iter_num * tokens_per_iter,
                         "loss/train": losses["train"],
-                        "loss/val": losses["val"],
+                        "loss/val": losses["validation"],
                         "lr": lr,
                         "mfu": running_mfu * 100,  # convert to percentage
                     }, step = iter_num
                 )
             except Exception as e:
                 print(f"logging to wandb failed: {e}")
-        if losses["val"] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses["val"]
+        if losses["validation"] < best_val_loss or always_save_checkpoint:
+            best_val_loss = losses["validation"]
             if iter_num > 0:
                 checkpoint = {
                     "model": raw_model.state_dict(),
@@ -306,7 +306,11 @@ while True:
             loss = raw_model.last_loss
             loss = loss / gradient_accumulation_steps
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = next(train_batch_iter)
+        try:
+            X, Y = next(train_batch_iter)
+        except StopIteration:
+            train_batch_iter = iter_batches(split="train")
+            X, Y = next(train_batch_iter)
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient

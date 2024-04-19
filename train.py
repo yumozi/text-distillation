@@ -34,7 +34,7 @@ from export import model_export
 
 # -----------------------------------------------------------------------------
 # I/O
-out_dir = "out"
+out_dir = "trained_out"
 eval_interval = 2000
 log_interval = 1
 eval_iters = 1

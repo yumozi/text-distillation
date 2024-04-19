@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, Tensor
 
 import pdb
 
@@ -54,6 +54,16 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(shape)
+
+
+# def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
+#     # Ensure freqs_cis can be broadcasted to match x dimensions
+#     # x expected shape: [batch_size, num_heads, seq_len, head_dim]
+#     freqs_cis_expanded = freqs_cis.unsqueeze(0).unsqueeze(0)  # Shape: [1, 1, seq_len, head_dim]
+#     target_shape = [1, 1, x.shape[2], x.shape[3]]  # Matching the seq_len and head_dim of x
+#     freqs_cis_broadcastable = freqs_cis_expanded.expand(target_shape)
+#     return freqs_cis_broadcastable
+
 
 def apply_rotary_emb(
     xq: torch.Tensor,

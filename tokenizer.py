@@ -6,9 +6,12 @@ import os
 import struct
 import argparse
 from typing import List
+from sentencepiece import SentencePieceProcessor
+from transformers import AutoTokenizer, AutoModel
+import torch
+from torch.nn.functional import cosine_similarity as cosine_similarity2
 import numpy as np
 from collections import Counter
-from sentencepiece import SentencePieceProcessor
 
 TOKENIZER_MODEL = "tokenizer.model" # the llama sentencepiece tokenizer model
 
@@ -112,6 +115,56 @@ def calculate_text_similarity(text1: str, text2: str, tokenizer_model: str = Non
     return similarity
 
 
+def calculate_similarity_with_ids(text, token_ids, tokenizer):
+    """
+    Calculate the cosine similarity between a piece of text and token IDs.
+
+    Args:
+        text (str): The text to compare.
+        token_ids (torch.Tensor or List[int]): The token IDs to compare.
+        tokenizer (Tokenizer): Tokenizer to encode the text.
+
+    Returns:
+        float: Cosine similarity between the vector representations of text and token IDs.
+    """
+    # Convert input text to token IDs using the tokenizer
+    text_token_ids = tokenizer.encode(text, bos=True, eos=True)
+
+    # Vectorize both sets of token IDs
+    vocab_size = tokenizer.n_words
+    vector1 = vectorize(text_token_ids, vocab_size)
+    vector2 = vectorize(token_ids if isinstance(token_ids, list) else token_ids.tolist(), vocab_size)
+
+    # Calculate cosine similarity
+    vec1 = np.array(vector1)
+    vec2 = np.array(vector2)
+    similarity = cosine_similarity(vec1, vec2)
+
+    return similarity
+
+
+# Load model and tokenizer
+model_name = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+
+
+def calculate_text_similarity2(text1, text2):
+    # Tokenize text
+    inputs1 = tokenizer(text1, return_tensors='pt', padding=True, truncation=True)
+    inputs2 = tokenizer(text2, return_tensors='pt', padding=True, truncation=True)
+
+    # Generate embeddings
+    with torch.no_grad():
+        embeddings1 = model(**inputs1).last_hidden_state.mean(dim=1)
+        embeddings2 = model(**inputs2).last_hidden_state.mean(dim=1)
+
+    # Calculate cosine similarity
+    similarity = cosine_similarity2(embeddings1, embeddings2)
+
+    return similarity.item()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-t", "--tokenizer-model", type=str, help="optional path to custom tokenizer ")
@@ -121,5 +174,7 @@ if __name__ == "__main__":
     t.export()
 
     # e.g. cosine similarity usage
-    # similarity_score = calculate_text_similarity("Example text for analysis.", "text for.")
-    # print(f"Cosine Similarity: {similarity_score}")
+    # text1 = "The weather is sunny."
+    # text2 = "It's a bright sunny day."
+    # similarity_score = calculate_text_similarity2(text1, text2)
+    # print("Similarity Score:", similarity_score)

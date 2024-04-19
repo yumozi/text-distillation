@@ -49,3 +49,10 @@ Run this to evaluate the model (that's currently in your out folder, called ckpt
 ```
 python3 commonsense.py
 ```
+
+### Evaluation on LAMBADA
+Make sure that the model checkpoints are placed in their folders if you haven't done so already (one checkpoint in ./out and one in ./trained_out)
+Then, you can run the model on the LAMBADA tes set
+```
+python3 lambada.py
+```

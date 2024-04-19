@@ -47,8 +47,8 @@ def evaluate(model, device, dataloader, tokenizer, temperature=0.9, top_k=100):
             probs = torch.nn.functional.softmax(top_k_values, dim=-1)
             next_token_id = torch.multinomial(probs, 1).squeeze(-1)
             predictions = top_k_indices.gather(-1, next_token_id.unsqueeze(-1)).squeeze(-1)
-            predicted_words = [tokenizer.decode([pred]) for pred in predictions.tolist()]
-            target_words = [tokenizer.decode([targ]) for targ in targets.tolist()]
+            # predicted_words = [tokenizer.decode([pred]) for pred in predictions.tolist()]
+            # target_words = [tokenizer.decode([targ]) for targ in targets.tolist()]
 
             # Compute cosine similarity
             for i, (pred, targ) in enumerate(zip(predictions, targets)):
@@ -78,19 +78,15 @@ def main():
     dataset = load_dataset("lambada", split="test")
     print(dataset)
     test_dataset = LambadaDataset(tokenizer, dataset)
-    test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False, collate_fn=custom_collate_fn)
+    test_dataloader = DataLoader(test_dataset, batch_size=2, shuffle=False, collate_fn=custom_collate_fn)
 
     model_paths = [
-        "out/simple_train/ckpt.pt",
-        "out/tiny_stories_untrained/ckpt.pt",
-        "out/wikitext_untrained/ckpt.pt",
-        "out/wikitext_trained/ckpt.pt"
+        "trained_out/ckpt.pt",
+        "out/ckpt.pt"
     ]
     model_names = [
-        "Simple Train",
-        "Tiny Stories Untrained",
-        "Wikitext Untrained",
-        "Wikitext Trained"
+        "trained",
+        "untrained"
     ]
 
     for model_path, model_name in zip(model_paths, model_names):

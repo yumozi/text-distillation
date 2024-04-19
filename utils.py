@@ -34,3 +34,30 @@ def train_syn(model, syn_loader, optimizer, iters=50, log_iters=10, gradient_acc
     
     return model
 
+
+
+def train_one_step(model, syn_decoded, optimizer):
+    """
+    Trains the transformer model on synthetic data embeddings, but only for one step.
+    """
+    X_syn = syn_decoded[:, :-1].contiguous()
+    Y_syn = syn_decoded[:, 1:].contiguous()
+
+    total_loss = 0
+   
+    logits = model(X_syn, Y_syn)
+    loss = model.last_loss
+    # loss = loss / gradient_accumulation_steps
+    total_loss += loss
+
+
+    loss.backward()
+
+    # flush the gradients as soon as we can, no need for this memory anymore
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    
+    print("Training with synthetic data for one step, loss is ", total_loss.item())
+
+    return model
+

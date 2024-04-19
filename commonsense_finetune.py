@@ -43,7 +43,7 @@ def train_model_one_pass(model, tokenizer, device, dataset, epochs=100, learning
     print("Training complete.")
 
 
-def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=3, learning_rate=5e-5):
+def train_model(model, tokenizer, device, dataset, batch_size=8, epochs=3, learning_rate=5e-5):
     model.train()
     optimizer = AdamW(model.parameters(), lr=learning_rate)
 
@@ -85,6 +85,7 @@ def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=3, lear
         print(f"Epoch {epoch + 1}/{epochs}, Average Loss: {avg_loss}")
 
     print("Training complete.")
+    return optimizer
 
 
 def format_question_and_choices(question, choices):
@@ -109,6 +110,51 @@ def format_question_and_choices(question, choices):
     return formatted_text
 
 
+def save_model(model, optimizer, model_args, out_dir, checkpoint_name="ckpt.pt"):
+    """
+    Save the PyTorch model along with training state.
+
+    Args:
+        model (torch.nn.Module): The model to save.
+        optimizer (torch.optim.Optimizer): The optimizer used in training.
+        model_args (dict): Dictionary of model configuration used for rebuilding the model.
+        out_dir (str): Directory where the checkpoint will be saved.
+        checkpoint_name (str): File name for the checkpoint.
+
+    Returns:
+        None
+    """
+    # Ensure the output directory exists; create it if it does not.
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    # Create the checkpoint dictionary to be saved.
+    checkpoint = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "model_args": model_args,
+    }
+
+    # Define the path for saving the checkpoint.
+    checkpoint_path = os.path.join(out_dir, checkpoint_name)
+
+    # Save the checkpoint.
+    torch.save(checkpoint, checkpoint_path)
+    print(f"Checkpoint saved successfully at {checkpoint_path}")
+
+
+model_args = {
+    'dim': 288,                 # Dimensionality of the model
+    'n_layers': 6,             # Number of layers
+    'n_heads': 6,              # Number of attention heads
+    'n_kv_heads': 6,           # Number of key/value heads (optional, can match n_heads)
+    'vocab_size': 32000,        # Size of the vocabulary
+    'multiple_of': 32,           # Ensures layer dimensions are multiples of this value
+    'max_seq_len': 256,         # Maximum sequence length the model can handle
+    'dropout': 0.0,             # Dropout rate
+}
+
+
 def main():
     device, model, tokenizer = setup()
 
@@ -117,7 +163,10 @@ def main():
     train_dataset = CommonsenseQADataloader(train_data)
 
     # Fine-tune the model
-    train_model(model, tokenizer, device, train_dataset)
+    optimizer = train_model(model, tokenizer, device, train_dataset)
+
+    # save the model
+    save_model(model, optimizer, model_args, "out")
 
 
 if __name__ == "__main__":

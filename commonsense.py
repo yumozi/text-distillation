@@ -45,6 +45,13 @@ def format_question_and_choices(question, choices):
     return formatted_text
 
 
+def pad_with_zeros(lst):
+    zeros_needed = 256 - len(lst)
+    zeros = [0] * max(zeros_needed, 0)
+    padded_list = zeros + lst
+    return padded_list
+
+
 class CommonsenseQADataloader(Dataset):
     def __init__(self, data):
         self.data = data
@@ -61,9 +68,9 @@ class CommonsenseQADataloader(Dataset):
         prompt = format_question_and_choices(question, choices)
         input_ids = self.tokenizer.encode(prompt, bos=True, eos=True)
         target_ids = self.tokenizer.encode(choices[label], bos=True, eos=True)
-        target_ids = input_ids[len(target_ids):] + target_ids
+        target_ids = input_ids + target_ids
 
-        return vectorize(input_ids, 32000), vectorize(target_ids, 32000)
+        return pad_with_zeros(input_ids), pad_with_zeros(target_ids)
 
 
 # tokenized model evaluation

@@ -50,19 +50,12 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
 
 def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     ndim = x.ndim
+    # print("freqs_cis.shape", freqs_cis.shape)
+    # print("xshape", (x.shape[1], x.shape[-1]))
     assert 0 <= 1 < ndim
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(shape)
-
-
-# def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
-#     # Ensure freqs_cis can be broadcasted to match x dimensions
-#     # x expected shape: [batch_size, num_heads, seq_len, head_dim]
-#     freqs_cis_expanded = freqs_cis.unsqueeze(0).unsqueeze(0)  # Shape: [1, 1, seq_len, head_dim]
-#     target_shape = [1, 1, x.shape[2], x.shape[3]]  # Matching the seq_len and head_dim of x
-#     freqs_cis_broadcastable = freqs_cis_expanded.expand(target_shape)
-#     return freqs_cis_broadcastable
 
 
 def apply_rotary_emb(
@@ -262,6 +255,8 @@ class Transformer(nn.Module):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
         h = self.dropout(h)
+
+        # print("h shape", h.shape)
 
         freqs_cos = self.freqs_cos[:seqlen]
         freqs_sin = self.freqs_sin[:seqlen]

@@ -7,6 +7,7 @@ from datasets import load_dataset
 from evaluate import setup
 from tokenizer import Tokenizer
 from commonsense import CommonsenseQADataloader
+import os
 
 
 def train_model_one_pass(model, tokenizer, device, dataset, epochs=100, learning_rate=5e-5):
@@ -42,7 +43,7 @@ def train_model_one_pass(model, tokenizer, device, dataset, epochs=100, learning
     print("Training complete.")
 
 
-def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=100, learning_rate=5e-5):
+def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=3, learning_rate=5e-5):
     model.train()
     optimizer = AdamW(model.parameters(), lr=learning_rate)
 
@@ -51,6 +52,7 @@ def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=100, le
 
     for epoch in range(epochs):
         total_loss = 0.0
+        counter = 0
         for batch in data_loader:
             optimizer.zero_grad()
             inputs, targets = [], []
@@ -63,11 +65,9 @@ def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=100, le
                 inputs.append(input_ids)
                 targets.append(target_ids)
 
-            # Convert lists to tensors and pad sequences
+            # Convert lists to tensors
             input_ids = torch.tensor(inputs).to(device).long()
             target_ids = torch.tensor(targets).to(device).long()
-            # input_ids = torch.tensor(inputs)
-            # target_ids = torch.tensor(targets)
 
             # Forward pass
             logits = model(input_ids, target_ids)
@@ -76,6 +76,9 @@ def train_model(model, tokenizer, device, dataset, batch_size=32, epochs=100, le
             optimizer.step()
 
             total_loss += loss.item()
+            counter += 1
+            if counter % 100 == 0:
+                print(counter, "batches complete")
 
         # Calculate average loss for the epoch
         avg_loss = total_loss / len(data_loader)

@@ -93,7 +93,6 @@ iter_batches = partial(
     Task.iter_batches,
     batch_size=batch_size,
     max_seq_len=max_seq_len,
-    vocab_size=vocab_size,
     device=device,
 )
 

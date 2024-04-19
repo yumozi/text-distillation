@@ -71,7 +71,9 @@ warmup_iters = 1000  # how many steps to warm up for
 # system
 device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = "bfloat16"  # float32|bfloat16|float16
+# compile related
 compile = True  # use PyTorch 2.0 to compile the model to be faster
+compile = compile and os.name != 'nt' # Windows OS doesn't support torch.compile
 # -----------------------------------------------------------------------------
 config_keys = [
     k
